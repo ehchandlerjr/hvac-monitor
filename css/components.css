@@ -1,0 +1,251 @@
+/* components.css — Reusable UI components */
+
+/* ── Card ─────────────────────────────────────── */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--card-padding);
+  box-shadow: var(--shadow);
+  transition:
+    transform var(--transition-speed),
+    box-shadow var(--transition-speed),
+    background 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Glaze overlay (some themes use this) */
+.card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--glaze);
+  pointer-events: none;
+  border-radius: inherit;
+}
+
+.card:hover {
+  transform: scale(var(--hover-scale));
+  box-shadow: var(--shadow-hover);
+}
+
+.card-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 12px;
+}
+
+/* ── Zone card (inside zones container) ───────── */
+.zone-card {
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 10px;
+  transition: border-color var(--transition-speed);
+}
+
+.zone-card:last-child { margin-bottom: 0; }
+
+.zone-card[data-status="danger"] { border-left: 3px solid var(--danger); }
+.zone-card[data-status="warning"] { border-left: 3px solid var(--warning); }
+.zone-card[data-status="ok"] { border-left: 3px solid var(--success); }
+.zone-card[data-status="offline"] { opacity: 0.5; }
+
+.zone-name {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+
+.zone-temp {
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1.2;
+}
+
+.zone-temp-na {
+  font-size: 1rem;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.zone-meta {
+  display: flex;
+  gap: 12px;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.zone-badge {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.badge-rising  { background: color-mix(in srgb, var(--danger) 15%, var(--surface)); color: var(--danger); }
+.badge-falling { background: color-mix(in srgb, var(--accent) 15%, var(--surface)); color: var(--accent); }
+.badge-stable  { background: var(--surface-dim); color: var(--text-muted); }
+
+/* ── Chart container ──────────────────────────── */
+.chart-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.chart-tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.chart-tab {
+  padding: 4px 12px;
+  border-radius: var(--radius);
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--surface-dim);
+  transition: all var(--transition-speed);
+}
+
+.chart-tab:hover { color: var(--text-secondary); }
+.chart-tab.active { background: var(--accent); color: var(--surface); }
+
+.ts-chart {
+  width: 100%;
+  height: 240px;
+  position: relative;
+}
+
+.ts-legend {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legend-swatch {
+  width: 12px;
+  height: 3px;
+  border-radius: 2px;
+}
+
+/* ── Analysis grid ────────────────────────────── */
+.analysis-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.analysis-item {
+  padding: 12px;
+  background: var(--surface-dim);
+  border-radius: var(--radius);
+}
+
+.analysis-label {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.analysis-value {
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: var(--text);
+  margin-top: 4px;
+}
+
+.analysis-detail {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+/* ── Delta grid ───────────────────────────────── */
+.delta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.delta-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  background: var(--surface-dim);
+  border-radius: var(--radius);
+  font-size: 0.8rem;
+}
+
+.delta-pair { color: var(--text-secondary); }
+
+.delta-value {
+  font-weight: 700;
+  font-family: var(--font-mono);
+}
+
+.delta-value.high { color: var(--danger); }
+
+/* ── Status bar ───────────────────────────────── */
+.status-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  padding: 8px 0;
+}
+
+.status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+.status-dot.ok      { background: var(--success); }
+.status-dot.warning  { background: var(--warning); }
+.status-dot.danger   { background: var(--danger); }
+.status-dot.offline  { background: var(--text-muted); }
+
+/* ── Tooltip (for chart hover) ────────────────── */
+.chart-tooltip {
+  position: absolute;
+  display: none;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  font-size: 0.75rem;
+  box-shadow: var(--shadow-hover);
+  pointer-events: none;
+  z-index: 100;
+  white-space: nowrap;
+}
+
+.chart-tooltip.visible { display: block; }

@@ -1,0 +1,106 @@
+/* layout.css — Dashboard grid & responsive layout */
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  transition: background 0.4s ease, color 0.3s ease;
+}
+
+.dashboard {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: var(--gap);
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+}
+
+/* Top bar: title + theme switcher */
+.top-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.top-bar h1 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: 0.01em;
+}
+
+.top-bar .outdoor-badge {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  font-weight: 400;
+}
+
+/* Theme switcher */
+.theme-switcher {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.theme-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  transition: transform var(--transition-speed), border-color var(--transition-speed);
+}
+
+.theme-btn:hover { transform: scale(1.15); }
+.theme-btn.active { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-glow); }
+
+/* Theme dot colors (hardcoded since they represent the themes themselves) */
+.theme-btn[data-theme="vellum"]       { background: #C7923E; }
+.theme-btn[data-theme="obsidian"]     { background: #1A1714; }
+.theme-btn[data-theme="vesper"]       { background: #2A2235; }
+.theme-btn[data-theme="scriptorium"]  { background: #2563EB; }
+
+/* Two-column grid for floor plan + zone cards */
+.main-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--gap);
+}
+
+@media (max-width: 700px) {
+  .main-grid { grid-template-columns: 1fr; }
+}
+
+/* Anomaly banner */
+.anomaly-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.anomaly-item {
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.anomaly-item[data-level="danger"] {
+  background: color-mix(in srgb, var(--danger) 12%, var(--surface));
+  border-left: 3px solid var(--danger);
+  color: var(--danger);
+}
+
+.anomaly-item[data-level="warning"] {
+  background: color-mix(in srgb, var(--warning) 12%, var(--surface));
+  border-left: 3px solid var(--warning);
+  color: var(--warning);
+}
+
+.anomaly-item[data-level="info"] {
+  background: var(--surface-dim);
+  border-left: 3px solid var(--text-muted);
+  color: var(--text-secondary);
+}

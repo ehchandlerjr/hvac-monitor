@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="vellum">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>HVAC Thermal Monitor</title>
+  <meta name="description" content="Real-time HVAC zone temperature monitoring dashboard">
+
+  <!-- Stylesheets (order matters: reset → tokens → layout → components) -->
+  <link rel="stylesheet" href="css/reset.css">
+  <link rel="stylesheet" href="css/tokens.css">
+  <link rel="stylesheet" href="css/layout.css">
+  <link rel="stylesheet" href="css/components.css">
+</head>
+<body>
+
+  <div class="dashboard">
+
+    <!-- Top bar -->
+    <div class="top-bar">
+      <div>
+        <h1>HVAC Monitor</h1>
+        <span class="outdoor-badge" id="outdoorBadge"></span>
+      </div>
+      <div class="theme-switcher" id="themeSwitcher"></div>
+    </div>
+
+    <!-- Anomaly banner (hidden when no alerts) -->
+    <div class="anomaly-banner" id="anomalyBanner" style="display:none;"></div>
+
+    <!-- Main grid: floor plan + zone cards -->
+    <div class="main-grid">
+      <div class="card">
+        <div class="card-label">Floor Plan</div>
+        <div id="floorPlan"></div>
+      </div>
+      <div class="card" style="overflow-y:auto;max-height:460px;">
+        <div class="card-label">Zones</div>
+        <div id="zonesContainer"></div>
+      </div>
+    </div>
+
+    <!-- Timeseries chart -->
+    <div class="card" style="position:relative;">
+      <div class="chart-header">
+        <div class="card-label" style="margin:0;">Temperature History</div>
+        <div class="chart-tabs" id="chartTabs">
+          <button class="chart-tab active" data-range="6">6h</button>
+          <button class="chart-tab" data-range="12">12h</button>
+          <button class="chart-tab" data-range="24">24h</button>
+        </div>
+      </div>
+      <div class="ts-chart" id="tsChart"></div>
+      <div class="ts-legend" id="tsLegend"></div>
+      <div class="chart-tooltip" id="tooltip"></div>
+    </div>
+
+    <!-- Thermal analysis -->
+    <div class="card">
+      <div class="card-label">Thermal Analysis</div>
+      <div class="analysis-grid" id="analysisGrid"></div>
+      <div class="card-label" style="margin-top:16px;">ΔT Room Differentials</div>
+      <div class="delta-grid" id="deltaGrid"></div>
+    </div>
+
+    <!-- Status bar -->
+    <div class="status-bar" id="statusBar">
+      <span><span class="status-dot offline"></span>Initializing...</span>
+    </div>
+
+  </div>
+
+  <!-- Composition root — ES modules, no bundler needed -->
+  <script type="module" src="js/main.js"></script>
+
+</body>
+</html>

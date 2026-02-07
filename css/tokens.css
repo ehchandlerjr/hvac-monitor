@@ -1,0 +1,218 @@
+/*
+ * tokens.css — Theme Definitions
+ * 
+ * ┌─────────────────────────────────────────────────┐
+ * │  TO CHANGE VISUAL APPEARANCE:                    │
+ * │  Edit ONLY this file. Every renderer reads       │
+ * │  these CSS custom properties. No JS changes.     │
+ * │                                                  │
+ * │  TO ADD A NEW THEME:                             │
+ * │  1. Add a [data-theme="yourname"] block below    │
+ * │  2. Register it in ThemeEngine.js                │
+ * │  That's it.                                      │
+ * └─────────────────────────────────────────────────┘
+ * 
+ * Tokens are organized by function, not by appearance:
+ * --bg, --surface, --border     → structural surfaces
+ * --text, --text-secondary      → typographic hierarchy
+ * --accent                      → primary interactive/highlight color
+ * --danger, --warning, --success → semantic status colors
+ * --line-N                      → timeseries chart line colors
+ * --chart-grid, --chart-text    → chart infrastructure
+ * --radius, --shadow            → shape & depth
+ * --font                        → typeface
+ * --grain-opacity, --glaze      → texture overlays
+ * 
+ * PENDING: These are placeholder themes. They will be replaced
+ * with research-informed designs based on Thomistic aesthetic
+ * analysis. See research_prompt.md for the design brief.
+ */
+
+/* ═══════════════════════════════════════════════════
+   VELLUM — Warm parchment, daylight reading
+   Inspired by: illuminated manuscript tradition
+   ═══════════════════════════════════════════════════ */
+[data-theme="vellum"] {
+  /* Typeface */
+  --font: Georgia, 'Times New Roman', serif;
+  --font-mono: 'Courier New', monospace;
+
+  /* Surfaces */
+  --bg: #FAF8F5;
+  --surface: #FFFEFA;
+  --surface-dim: #F5F2ED;
+  --border: #E8E4DD;
+
+  /* Typography */
+  --text: #1A1612;
+  --text-secondary: #6B6560;
+  --text-muted: #A8A29E;
+
+  /* Accent & Status */
+  --accent: #C7923E;
+  --accent-glow: rgba(199, 146, 62, 0.15);
+  --danger: #C0392B;
+  --warning: #E67E22;
+  --success: #5A8A5E;
+
+  /* Chart lines (one per zone + outdoor) */
+  --line-1: #C7923E;
+  --line-2: #8B6E3E;
+  --line-3: #6A8A6A;
+  --line-4: #8A6A8A;
+  --line-outdoor: #A8A29E;
+
+  /* Chart infrastructure */
+  --chart-grid: rgba(26, 22, 18, 0.08);
+  --chart-text: #6B6560;
+
+  /* Shape & depth */
+  --radius: 8px;
+  --shadow: 0 2px 12px rgba(26, 22, 18, 0.08);
+  --shadow-hover: 0 6px 24px rgba(26, 22, 18, 0.12);
+
+  /* Texture */
+  --grain-opacity: 0.025;
+  --glaze: none;
+
+  /* Spacing & motion */
+  --card-padding: 24px;
+  --gap: 20px;
+  --hover-scale: 1.015;
+  --transition-speed: 200ms;
+}
+
+/* ═══════════════════════════════════════════════════
+   OBSIDIAN — Deep dark, nighttime monitoring
+   Inspired by: monastic vigil, night office
+   ═══════════════════════════════════════════════════ */
+[data-theme="obsidian"] {
+  --font: Georgia, 'Times New Roman', serif;
+  --font-mono: 'Courier New', monospace;
+
+  --bg: #1A1714;
+  --surface: #282422;
+  --surface-dim: #221F1C;
+  --border: #3D3935;
+
+  --text: #F5F0E8;
+  --text-secondary: #C5BEB4;
+  --text-muted: #7A756E;
+
+  --accent: #E5B55C;
+  --accent-glow: rgba(229, 181, 92, 0.2);
+  --danger: #E57373;
+  --warning: #FFB74D;
+  --success: #81C784;
+
+  --line-1: #E5B55C;
+  --line-2: #C7923E;
+  --line-3: #81C784;
+  --line-4: #CE93D8;
+  --line-outdoor: #7A756E;
+
+  --chart-grid: rgba(229, 181, 92, 0.08);
+  --chart-text: #C5BEB4;
+
+  --radius: 8px;
+  --shadow: inset 0 1px 0 rgba(229, 181, 92, 0.06);
+  --shadow-hover: inset 0 1px 0 rgba(229, 181, 92, 0.1), 0 0 20px rgba(229, 181, 92, 0.08);
+
+  --grain-opacity: 0.015;
+  --glaze: linear-gradient(135deg, rgba(229, 181, 92, 0.03) 0%, transparent 50%);
+
+  --card-padding: 24px;
+  --gap: 20px;
+  --hover-scale: 1.01;
+  --transition-speed: 300ms;
+}
+
+/* ═══════════════════════════════════════════════════
+   VESPER — Twilight warmth, evening vigil
+   Inspired by: vespers liturgical hour, golden hour
+   ═══════════════════════════════════════════════════ */
+[data-theme="vesper"] {
+  --font: 'Palatino Linotype', Palatino, 'Book Antiqua', serif;
+  --font-mono: 'Courier New', monospace;
+
+  --bg: #2A2235;
+  --surface: #342A42;
+  --surface-dim: #2E2540;
+  --border: #4A3D5C;
+
+  --text: #F0E6D8;
+  --text-secondary: #C4B8A8;
+  --text-muted: #8A7E92;
+
+  --accent: #D4956A;
+  --accent-glow: rgba(212, 149, 106, 0.2);
+  --danger: #E57373;
+  --warning: #FFB74D;
+  --success: #A5D6A7;
+
+  --line-1: #D4956A;
+  --line-2: #B07850;
+  --line-3: #A5D6A7;
+  --line-4: #B39DDB;
+  --line-outdoor: #8A7E92;
+
+  --chart-grid: rgba(212, 149, 106, 0.1);
+  --chart-text: #C4B8A8;
+
+  --radius: 12px;
+  --shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  --shadow-hover: 0 8px 32px rgba(0, 0, 0, 0.4);
+
+  --grain-opacity: 0.02;
+  --glaze: linear-gradient(160deg, rgba(212, 149, 106, 0.05) 0%, transparent 40%);
+
+  --card-padding: 24px;
+  --gap: 20px;
+  --hover-scale: 1.02;
+  --transition-speed: 350ms;
+}
+
+/* ═══════════════════════════════════════════════════
+   SCRIPTORIUM — Scholar's focus, high-contrast data
+   Inspired by: monastic scriptorium, ruled vellum
+   ═══════════════════════════════════════════════════ */
+[data-theme="scriptorium"] {
+  --font: 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --font-mono: 'Consolas', 'Courier New', monospace;
+
+  --bg: #FAFBFC;
+  --surface: #FFFFFF;
+  --surface-dim: #F4F5F7;
+  --border: #D1D5DB;
+
+  --text: #111827;
+  --text-secondary: #4B5563;
+  --text-muted: #9CA3AF;
+
+  --accent: #2563EB;
+  --accent-glow: rgba(37, 99, 235, 0.1);
+  --danger: #DC2626;
+  --warning: #D97706;
+  --success: #059669;
+
+  --line-1: #2563EB;
+  --line-2: #7C3AED;
+  --line-3: #059669;
+  --line-4: #DC2626;
+  --line-outdoor: #9CA3AF;
+
+  --chart-grid: rgba(17, 24, 39, 0.06);
+  --chart-text: #4B5563;
+
+  --radius: 4px;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  --shadow-hover: 0 4px 12px rgba(0, 0, 0, 0.1);
+
+  --grain-opacity: 0;
+  --glaze: none;
+
+  --card-padding: 20px;
+  --gap: 16px;
+  --hover-scale: 1.005;
+  --transition-speed: 150ms;
+}

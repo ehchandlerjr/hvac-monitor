@@ -13,7 +13,7 @@ export class Reading {
   /** @param {{ sensorId: string, timestamp: Date, tempF: number, humidityPct?: number, batteryPct?: number }} params */
   constructor({ sensorId, timestamp, tempF, humidityPct = null, batteryPct = null }) {
     if (typeof tempF !== 'number' || Number.isNaN(tempF)) {
-      throw new Error(`Reading requires numeric tempF, got: ${tempF}`);
+      return Object.freeze(Object.assign(this, { sensorId, timestamp: timestamp instanceof Date ? timestamp : new Date(timestamp), tempF: null, humidityPct, batteryPct, _invalid: true }));
     }
     Object.freeze(Object.assign(this, {
       sensorId,

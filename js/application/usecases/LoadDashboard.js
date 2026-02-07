@@ -70,7 +70,7 @@ export async function loadDashboard({ dataPort, clockPort, zones, hours = 24 }) 
   }
 
   // ── 3. Hydrate readings into domain entities ───
-  const readings = rawReadings.map(r => new Reading({
+  const readings = rawReadings.filter(r => r.temp_f != null).map(r => new Reading({
     sensorId: r.sensor_id,
     timestamp: new Date(r.timestamp),
     tempF: r.temp_f,

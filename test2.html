@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html><body style="background:#111;color:#0f0;font-family:monospace;padding:20px;">
+<pre id="log">Testing App.js imports...</pre>
+<script type="module">
+const log = document.getElementById('log');
+const add = msg => { log.textContent += '\n' + msg; };
+
+const imports = [
+  ['LoadDashboard', './js/application/usecases/LoadDashboard.js'],
+  ['AnalyzeZones', './js/application/usecases/AnalyzeZones.js'],
+  ['FloorPlanRenderer', './js/presentation/renderers/FloorPlanRenderer.js'],
+  ['TimeseriesRenderer', './js/presentation/renderers/TimeseriesRenderer.js'],
+  ['ZoneCardRenderer', './js/presentation/renderers/ZoneCardRenderer.js'],
+  ['AnalysisRenderer', './js/presentation/renderers/AnalysisRenderer.js'],
+  ['StatusBarRenderer', './js/presentation/renderers/StatusBarRenderer.js'],
+];
+
+for (const [name, path] of imports) {
+  try {
+    await import(path);
+    add('OK: ' + name);
+  } catch(e) {
+    add('FAIL: ' + name + ' -> ' + e.message);
+  }
+}
+add('\nDone.');
+</script>
+</body></html>

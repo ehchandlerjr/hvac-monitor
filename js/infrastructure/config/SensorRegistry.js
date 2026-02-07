@@ -1,133 +1,72 @@
-/**
- * SensorRegistry — Infrastructure Configuration
- * 
- * THE file to edit when you add/move/remove sensors.
- * Everything else in the system reads from this.
- * 
- * This is the single source of truth for:
- * - What zones exist
- * - Which HVAC zone each room belongs to
- * - Which sensors are in each zone
- * - Adjacency relationships (for ΔT analysis)
- * - SVG layout hints (for floor plan rendering)
- * - Thermal resistance estimates per zone (for heat loss calcs)
- * 
- * ┌───────────────────────────────────────────┐
- * │  TO ADD A SENSOR:                         │
- * │  1. Add it to the sensors array in its    │
- * │     zone below                            │
- * │  2. Commit and push                       │
- * │  That's it. Everything else auto-adapts.  │
- * └───────────────────────────────────────────┘
- */
-
 import { Sensor } from '../../domain/entities/Sensor.js';
 import { Zone } from '../../domain/entities/Zone.js';
 
-// ── Supabase configuration ────────────────────────
-// SET THESE before deploying. The anon key is safe to expose in client code
-// as long as you have Row Level Security on your Supabase table.
 export const SUPABASE_CONFIG = {
-  url: 'https://pbidxylxpolvddukhxlr.supabase.co',       // e.g. 'https://xxxxx.supabase.co'
-  anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBiaWR4eWx4cG9sdmRkdWtoeGxyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAzOTM2NTcsImV4cCI6MjA4NTk2OTY1N30.zgCiG43jKnD3v1aKXfWh929I47GnvdkRYs0pOSc6EFo',   // e.g. 'eyJhbGciOi...'
+  url: 'https://pbidxylxpolvddukhxlr.supabase.co',
+  anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBiaWR4eWx4cG9sdmRkdWtoeGxyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAzOTM2NTcsImV4cCI6MjA4NTk2OTY1N30.zgCiG43jKnD3v1aKXfWh929I47GnvdkRYs0pOSc6EFo',
   tableName: 'readings',
 };
 
-// ── Polling configuration ────────────────────────
-export const POLL_INTERVAL_MS = 5 * 60_000;  // 5 minutes (matches GitHub Actions cron)
+export const POLL_INTERVAL_MS = 5 * 60000;
 export const DEFAULT_HISTORY_HOURS = 24;
 
-// ── Thermal resistance estimates (°F·hr/BTU) ─────
-// Higher = better insulated. These are rough estimates for comparison.
 export const THERMAL_RESISTANCES = new Map([
-  ['nursery',     0.8],   // Exterior wall, possibly poor damper
-  ['elijah',      0.9],   // Same zone, interior wall benefit
-  ['master',      1.0],   // Well-regulated zone
-  ['downstairs',  1.1],   // Ground floor, more mass
+  ['teddys_room', 0.8],
+  ['eliots_room', 0.9],
+  ['master', 1.0],
+  ['play_room', 1.1],
 ]);
 
-// ── Zone & Sensor definitions ────────────────────
-
-/**
- * Build the full zone/sensor graph.
- * Called once at startup by the composition root.
- * 
- * @returns {Zone[]}
- */
 export function buildZoneGraph() {
-  // ── Create sensors ─────────────────────────────
-  const nurseryBed = new Sensor({
-    sensorId: 'nursery_bed',
-    label: 'Nursery (Bed Level)',
+  const teddySensor = new Sensor({
+    sensorId: "teddy's_room___sensor___temperature_and_relative_humidity",
+    label: "Teddy's Room Sensor",
+  });
+  const eliotSensor = new Sensor({
+    sensorId: "eliot's_room___sensor___temperature_and_relative_humidity",
+    label: "Eliot's Room Sensor",
+  });
+  const masterSensor = new Sensor({
+    sensorId: 'master_bedroom___sensor___temperature_and_relative_humidity',
+    label: 'Master Bedroom Sensor',
+  });
+  const playSensor = new Sensor({
+    sensorId: 'play_room___sensor___temperature_and_relative_humidity',
+    label: 'Play Room Sensor',
+  });
+  const multiSensor = new Sensor({
+    sensorId: 'multipurpose_sensor',
+    label: 'Multipurpose Sensor',
   });
 
-  const elijahMid = new Sensor({
-    sensorId: 'elijah_mid',
-    label: "Elijah's Room (Mid)",
+  const teddys = new Zone({
+    zoneId: 'teddys_room', name: "Teddy's Room", hvacZone: 'boys_rooms',
+    adjacentZoneIds: ['eliots_room', 'master'],
+    svgLayout: { x: 10, y: 10, w: 180, h: 130, labelY: 50, tempY: 80, cx: 100 },
   });
+  teddys.addSensor(teddySensor);
 
-  const masterBassinet = new Sensor({
-    sensorId: 'master_bassinet',
-    label: 'Master (Bassinet)',
+  const eliots = new Zone({
+    zoneId: 'eliots_room', name: "Eliot's Room", hvacZone: 'boys_rooms',
+    adjacentZoneIds: ['teddys_room', 'master'],
+    svgLayout: { x: 200, y: 10, w: 180, h: 130, labelY: 50, tempY: 80, cx: 290 },
   });
-
-  const downstairsThermo = new Sensor({
-    sensorId: 'downstairs_thermo',
-    label: 'Downstairs (Thermostat)',
-  });
-
-  // ── Create zones ───────────────────────────────
-  const nursery = new Zone({
-    zoneId: 'nursery',
-    name: 'Nursery',
-    hvacZone: 'boys_rooms',
-    adjacentZoneIds: ['elijah', 'master'],
-    svgLayout: {
-      // Second floor, left room
-      x: 10, y: 10, w: 180, h: 130,
-      labelY: 50, tempY: 80, cx: 100,
-    },
-  });
-  nursery.addSensor(nurseryBed);
-
-  const elijah = new Zone({
-    zoneId: 'elijah',
-    name: "Elijah's Room",
-    hvacZone: 'boys_rooms',
-    adjacentZoneIds: ['nursery', 'master'],
-    svgLayout: {
-      // Second floor, right room
-      x: 200, y: 10, w: 180, h: 130,
-      labelY: 50, tempY: 80, cx: 290,
-    },
-  });
-  elijah.addSensor(elijahMid);
+  eliots.addSensor(eliotSensor);
 
   const master = new Zone({
-    zoneId: 'master',
-    name: 'Master Bedroom',
-    hvacZone: 'master',
-    adjacentZoneIds: ['nursery', 'elijah'],
-    svgLayout: {
-      // Second floor, back
-      x: 10, y: 150, w: 180, h: 130,
-      labelY: 50, tempY: 80, cx: 100,
-    },
+    zoneId: 'master', name: 'Master Bedroom', hvacZone: 'master',
+    adjacentZoneIds: ['teddys_room', 'eliots_room'],
+    svgLayout: { x: 10, y: 150, w: 180, h: 130, labelY: 50, tempY: 80, cx: 100 },
   });
-  master.addSensor(masterBassinet);
+  master.addSensor(masterSensor);
 
-  const downstairs = new Zone({
-    zoneId: 'downstairs',
-    name: 'Downstairs',
-    hvacZone: 'downstairs',
-    adjacentZoneIds: [],  // Connected via stairwell, not directly adjacent
-    svgLayout: {
-      // First floor
-      x: 200, y: 150, w: 180, h: 130,
-      labelY: 50, tempY: 80, cx: 290,
-    },
+  const playRoom = new Zone({
+    zoneId: 'play_room', name: 'Play Room', hvacZone: 'downstairs',
+    adjacentZoneIds: [],
+    svgLayout: { x: 200, y: 150, w: 180, h: 130, labelY: 50, tempY: 80, cx: 290 },
   });
-  downstairs.addSensor(downstairsThermo);
+  playRoom.addSensor(playSensor);
+  playRoom.addSensor(multiSensor);
 
-  return [nursery, elijah, master, downstairs];
+  return [teddys, eliots, master, playRoom];
 }

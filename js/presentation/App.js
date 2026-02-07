@@ -8,13 +8,13 @@
  * it calls use cases, then feeds results to renderers.
  */
 
-import { loadDashboard } from '../../application/usecases/LoadDashboard.js';
-import { analyzeZones } from '../../application/usecases/AnalyzeZones.js';
-import { renderFloorPlan } from '../renderers/FloorPlanRenderer.js';
-import { renderTimeseries } from '../renderers/TimeseriesRenderer.js';
-import { renderZoneCards } from '../renderers/ZoneCardRenderer.js';
-import { renderAnalysis } from '../renderers/AnalysisRenderer.js';
-import { renderStatusBar } from '../renderers/StatusBarRenderer.js';
+import { loadDashboard } from '../application/usecases/LoadDashboard.js';
+import { analyzeZones } from '../application/usecases/AnalyzeZones.js';
+import { renderFloorPlan } from './renderers/FloorPlanRenderer.js';
+import { renderTimeseries } from './renderers/TimeseriesRenderer.js';
+import { renderZoneCards } from './renderers/ZoneCardRenderer.js';
+import { renderAnalysis } from './renderers/AnalysisRenderer.js';
+import { renderStatusBar } from './renderers/StatusBarRenderer.js';
 
 export class App {
   /**

@@ -28,8 +28,8 @@ import { Zone } from '../../domain/entities/Zone.js';
 // SET THESE before deploying. The anon key is safe to expose in client code
 // as long as you have Row Level Security on your Supabase table.
 export const SUPABASE_CONFIG = {
-  url: '',       // e.g. 'https://xxxxx.supabase.co'
-  anonKey: '',   // e.g. 'eyJhbGciOi...'
+  url: 'https://pbidxylxpolvddukhxlr.supabase.co',       // e.g. 'https://xxxxx.supabase.co'
+  anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBiaWR4eWx4cG9sdmRkdWtoeGxyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAzOTM2NTcsImV4cCI6MjA4NTk2OTY1N30.zgCiG43jKnD3v1aKXfWh929I47GnvdkRYs0pOSc6EFo',   // e.g. 'eyJhbGciOi...'
   tableName: 'readings',
 };
 

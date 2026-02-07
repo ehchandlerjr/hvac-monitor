@@ -70,7 +70,7 @@ export class Sensor {
   get status() {
     const r = this.latestReading;
     if (!r) return 'offline';
-    if (r.isStale(15)) return 'stale';
+    if (r.isStale(60)) return 'stale';
     return 'online';
   }
 

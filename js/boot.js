@@ -1,68 +1,80 @@
-/**
- * main.js — Composition Root
- * 
- * THE ONLY FILE that knows about concrete implementations.
- * This is where dependency injection happens.
- * 
- * ┌─────────────────────────────────────────────────┐
- * │  Wire diagram:                                   │
- * │                                                  │
- * │  SensorRegistry ──→ Zone[]                       │
- * │                      ↓                           │
- * │  DataPort (Supabase or Mock)                     │
- * │       ↓                                          │
- * │  LoadDashboard (use case) ──→ DashboardSnapshot  │
- * │       ↓                                          │
- * │  AnalyzeZones (use case) ──→ AnalysisResult      │
- * │       ↓                                          │
- * │  App (presentation) ──→ Renderers ──→ DOM        │
- * └─────────────────────────────────────────────────┘
- */
+const D = document.getElementById('statusBar');
+const errors = [];
+const log = msg => { errors.push(msg); if(D) D.innerHTML = '<span style="color:red;font-size:11px;white-space:pre-wrap">' + errors.join('\n') + '</span>'; console.log(msg); };
+window.onerror = (m,s,l) => log('ERR: '+m+' '+s+':'+l);
+window.addEventListener('unhandledrejection', e => log('PROMISE: '+e.reason));
 
-import { SupabaseAdapter } from './infrastructure/adapters/SupabaseAdapter.js';
-import { MockAdapter } from './infrastructure/adapters/MockAdapter.js';
-import { BrowserClockAdapter } from './infrastructure/adapters/BrowserClockAdapter.js';
-import {
-  SUPABASE_CONFIG,
-  POLL_INTERVAL_MS,
-  DEFAULT_HISTORY_HOURS,
-  THERMAL_RESISTANCES,
-  buildZoneGraph,
-} from './infrastructure/config/SensorRegistry.js';
-import { ThemeEngine } from './presentation/engine/ThemeEngine.js';
-import { App } from './presentation/App.js';
+(async () => {
+  try {
+    log('1. Loading config...');
+    const { SUPABASE_CONFIG, POLL_INTERVAL_MS, DEFAULT_HISTORY_HOURS, THERMAL_RESISTANCES, buildZoneGraph } = await import('./infrastructure/config/SensorRegistry.js');
 
-// ── Decide which adapter to use ──────────────────
-const isConfigured = SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey;
-const isDemo = !isConfigured;
+    log('2. Building zones...');
+    const zones = buildZoneGraph();
+    log('   Zones: ' + zones.map(z => z.name).join(', '));
 
-const dataPort = isConfigured
-  ? new SupabaseAdapter({
-      url: SUPABASE_CONFIG.url,
-      anonKey: SUPABASE_CONFIG.anonKey,
-      tableName: SUPABASE_CONFIG.tableName,
-    })
-  : new MockAdapter();
+    log('3. Loading adapters...');
+    const { SupabaseAdapter } = await import('./infrastructure/adapters/SupabaseAdapter.js');
+    const { MockAdapter } = await import('./infrastructure/adapters/MockAdapter.js');
+    const { BrowserClockAdapter } = await import('./infrastructure/adapters/BrowserClockAdapter.js');
 
-if (isDemo) {
-  console.log('[main] No Supabase config — running in demo mode with mock data');
-} else {
-  console.log(`[main] Connected to Supabase: ${SUPABASE_CONFIG.url}`);
-}
+    const isConfigured = SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey;
+    const dataPort = isConfigured ? new SupabaseAdapter(SUPABASE_CONFIG) : new MockAdapter();
+    log('4. DataPort: ' + (isConfigured ? 'Supabase' : 'Mock'));
 
-// ── Build domain graph ───────────────────────────
-const zones = buildZoneGraph();
+    log('5. Fetching readings...');
+    const raw = await dataPort.fetchReadings(DEFAULT_HISTORY_HOURS);
+    log('   Raw rows: ' + raw.length);
+    const nullTemps = raw.filter(r => r.temp_f == null).length;
+    const goodTemps = raw.filter(r => r.temp_f != null).length;
+    log('   Good: ' + goodTemps + ', Null temp_f: ' + nullTemps);
+    if(raw.length > 0) log('   Sample: ' + JSON.stringify(raw[0]).substring(0,200));
 
-// ── Wire up and start ────────────────────────────
-const app = new App({
-  dataPort,
-  clockPort: new BrowserClockAdapter(),
-  themeEngine: new ThemeEngine('vellum'),
-  zones,
-  thermalResistances: THERMAL_RESISTANCES,
-  pollIntervalMs: isDemo ? 30_000 : POLL_INTERVAL_MS, // Faster in demo
-  historyHours: DEFAULT_HISTORY_HOURS,
-  isDemo,
-});
+    log('6. Fetching weather...');
+    const weather = await dataPort.fetchLatestWeather();
+    log('   Weather: ' + (weather ? weather.outdoor_temp_f + '°F' : 'null'));
 
-app.start().catch(err => console.error('[main] Failed to start:', err));
+    log('7. Loading domain...');
+    const { Reading } = await import('./domain/entities/Reading.js');
+    const filtered = raw.filter(r => r.temp_f != null);
+    log('   Creating ' + filtered.length + ' readings...');
+    const readings = filtered.map(r => new Reading({
+      sensorId: r.sensor_id,
+      timestamp: new Date(r.timestamp),
+      tempF: r.temp_f,
+      humidityPct: r.humidity_pct,
+      batteryPct: r.battery_pct,
+    }));
+    log('   Readings created: ' + readings.length);
+
+    log('8. Distributing to zones...');
+    for (const zone of zones) {
+      for (const sensor of zone.sensors) {
+        sensor.clearReadings();
+        sensor.ingestReadings(readings);
+      }
+      log('   ' + zone.name + ': ' + zone.currentTempF?.toFixed(1) + '°F (' + zone.sensors[0]?.readingCount + ' readings)');
+    }
+
+    log('9. Loading App...');
+    const { ThemeEngine } = await import('./presentation/engine/ThemeEngine.js');
+    const { App } = await import('./presentation/App.js');
+
+    log('10. Starting app...');
+    const app = new App({
+      dataPort,
+      clockPort: new BrowserClockAdapter(),
+      themeEngine: new ThemeEngine('vellum'),
+      zones: buildZoneGraph(),
+      thermalResistances: THERMAL_RESISTANCES,
+      pollIntervalMs: isConfigured ? POLL_INTERVAL_MS : 30000,
+      historyHours: DEFAULT_HISTORY_HOURS,
+      isDemo: !isConfigured,
+    });
+    await app.start();
+    log('DONE - app running');
+  } catch(e) {
+    log('FATAL: ' + e.message);
+    log(e.stack);
+  }
+})();

@@ -219,7 +219,7 @@ setInterval(function() {
 
     // Step 4: filter recent 30 min — handle any ts format
     var now = Date.now();
-    var cutoff30 = now - 30 * 60000;
+    var cutoff30 = now - 60 * 60000;
     var recent = [];
     for (var j = 0; j < master.timeSeries.length; j++) {
       var pt = master.timeSeries[j];

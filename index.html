@@ -1,17 +1,28 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="obsidian">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="color-scheme" content="only light">
   <title>HVAC Thermal Monitor</title>
-  <link rel="stylesheet" href="css/reset.css?v=10">
-  <link rel="stylesheet" href="css/tokens.css?v=10">
-  <link rel="stylesheet" href="css/layout.css?v=10">
-  <link rel="stylesheet" href="css/components.css?v=10">
-  <script>try{const t=localStorage.getItem('hvac-theme');if(t)document.documentElement.setAttribute('data-theme',t);}catch{}</script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/reset.css">
+  <link rel="stylesheet" href="css/tokens.css">
+  <link rel="stylesheet" href="css/layout.css">
+  <link rel="stylesheet" href="css/components.css">
+  <script>
+    // Apply saved theme BEFORE first paint to prevent flash
+    try {
+      var t = localStorage.getItem('hvac-theme') || 'tenebrae';
+      document.addEventListener('DOMContentLoaded', function() { document.body.className = 't-' + t; });
+    } catch(e) {}
+  </script>
 </head>
-<body>
+<body class="t-tenebrae">
+
   <div class="dashboard">
+
     <div class="top-bar">
       <div>
         <h1>HVAC Monitor</h1>
@@ -19,15 +30,19 @@
       </div>
       <div class="theme-switcher" id="themeSwitcher"></div>
     </div>
+
     <div class="anomaly-banner" id="anomalyBanner" style="display:none;"></div>
+
     <div class="card">
       <div class="card-label">Floor Plan</div>
       <div id="floorPlan"></div>
     </div>
+
     <div class="card">
       <div class="card-label">Zones</div>
       <div id="zonesContainer"></div>
     </div>
+
     <div class="card" style="position:relative;">
       <div class="chart-header">
         <div class="card-label" style="margin:0;">Temperature History</div>
@@ -40,16 +55,20 @@
       <div class="ts-chart" id="tsChart"></div>
       <div class="ts-legend" id="tsLegend"></div>
     </div>
+
     <div class="card">
       <div class="card-label">Thermal Analysis</div>
       <div class="analysis-grid" id="analysisGrid"></div>
       <div class="card-label" style="margin-top:16px;">ΔT Room Differentials</div>
       <div class="delta-grid" id="deltaGrid"></div>
     </div>
+
     <div class="status-bar" id="statusBar">
       <span><span class="status-dot offline"></span>Loading...</span>
     </div>
+
   </div>
-  <script src="js/bundle.js?v=10"></script>
+
+  <script src="js/bundle.js"></script>
 </body>
 </html>

@@ -35,14 +35,13 @@ const ZONES = [
     adjacent: [],
     sensors: [
       { id: 'play_room___sensor___temperature_and_relative_humidity', label: 'Play Room Sensor' },
-      { id: 'multipurpose_sensor', label: 'Multipurpose' },
     ],
     svg: { x: 200, y: 150, w: 180, h: 130, cx: 290 },
   },
 ];
 
 const THEMES = ['vellum', 'tenebrae', 'lauds', 'scriptorium'];
-const THEME_LABELS = { vellum: 'Vellum', tenebrae: 'Tenebrae', lauds: 'Lauds', scriptorium: 'Script.' };
+const THEME_LABELS = { vellum: 'Vellum', tenebrae: 'Tenebrae', lauds: 'Lauds', scriptorium: 'Scriptorium' };
 
 // ── SUPABASE ─────────────────────────────────────────────────
 const headers = { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY };
@@ -250,14 +249,15 @@ function renderFloorPlan(zones) {
   const ts = cssVar('--ts');
   const tm = cssVar('--tm');
   const bd = cssVar('--bd') || 'rgba(128,128,128,0.2)';
-  const ok = cssVar('--ok');
+  const lineColors = [cssVar('--c1'), cssVar('--c2'), cssVar('--c3'), cssVar('--c4')];
 
   const svg = svgEl('svg', { viewBox: '0 0 400 300' });
   svg.style.cssText = 'width:100%;display:block;';
 
-  for (const z of zones) {
+  zones.forEach((z, i) => {
     const s = z.svg;
-    const borderColor = z.online ? ok : bd;
+    const zoneColor = lineColors[i % 4];
+    const borderColor = z.online ? zoneColor : bd;
     const borderWidth = z.online ? 2 : 1;
     const fillColor = z.online ? sf : bg;
     const opacity = z.online ? 1 : 0.6;
@@ -294,7 +294,7 @@ function renderFloorPlan(zones) {
       badge.textContent = '×' + z.sensors.length;
       svg.appendChild(badge);
     }
-  }
+  });
 
   fp.innerHTML = '';
   fp.appendChild(svg);
@@ -304,8 +304,11 @@ function renderZoneCards(zones, weather) {
   const zc = document.getElementById('zonesContainer');
   if (!zc) return;
 
-  zc.innerHTML = zones.map(z => {
+  const lineColors = [cssVar('--c1'), cssVar('--c2'), cssVar('--c3'), cssVar('--c4')];
+
+  zc.innerHTML = zones.map((z, i) => {
     const status = !z.online ? 'offline' : z.avgTemp && z.avgTemp < 65 ? 'warning' : 'ok';
+    const zoneColor = lineColors[i % 4];
 
     let rateBadge = '';
     if (z.rate) {
@@ -327,7 +330,8 @@ function renderZoneCards(zones, weather) {
     const onlineCount = z.sensorData.filter(s => s.latest).length;
     meta.push(onlineCount + '/' + z.sensorData.length + ' sensors');
 
-    return '<div class="zone-card" data-status="' + status + '">' +
+    const borderStyle = status === 'ok' ? ' style="border-left:3px solid ' + zoneColor + '"' : '';
+    return '<div class="zone-card" data-status="' + status + '"' + borderStyle + '>' +
       '<div class="zone-name">' + z.name + ' ' + rateBadge + '</div>' +
       tempDisp +
       (meta.length ? '<div class="zone-meta">' + meta.map(m => '<span>' + m + '</span>').join('') + '</div>' : '') +

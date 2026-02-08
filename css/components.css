@@ -106,13 +106,13 @@
 }
 
 .badge-rising {
-  background: color-mix(in srgb, var(--dg) 12%, transparent);
-  color: var(--dg);
+  background: color-mix(in srgb, var(--ac) 12%, transparent);
+  color: var(--ac);
 }
 
 .badge-falling {
-  background: color-mix(in srgb, var(--ok) 12%, transparent);
-  color: var(--ok);
+  background: color-mix(in srgb, var(--ac) 12%, transparent);
+  color: var(--ac);
 }
 
 .badge-stable {

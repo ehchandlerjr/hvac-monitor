@@ -8,6 +8,7 @@
    Claritas as direct material radiance (lux)
    ─────────────────────────────────────────────── */
 .t-vellum {
+  color-scheme: light;
   --ff: Georgia, 'Times New Roman', serif;
   --bg: #FAF8F5; --sf: #FFFEFA; --sd: #F5F2ED; --bd: #E8E4DD;
   --tx: #1A1612; --ts: #6B6560; --tm: #A8A29E;
@@ -27,6 +28,7 @@
    Claritas through apophasis — gold persisting through darkness
    ─────────────────────────────────────────────── */
 .t-tenebrae {
+  color-scheme: dark;
   --ff: Georgia, 'Times New Roman', serif;
   --bg: #1A1714; --sf: #282422; --sd: #221F1C; --bd: #3D3935;
   --tx: #F5F0E8; --ts: #C5BEB4; --tm: #7A756E;
@@ -47,13 +49,14 @@
    Claritas as intellectual precision — form without mediation
    ─────────────────────────────────────────────── */
 .t-lauds {
+  color-scheme: light;
   --ff: 'Inter', -apple-system, sans-serif;
   --bg: #F4F6F8; --sf: #FFFFFF; --sd: #EDF0F3; --bd: #D1D8DE;
   --tx: #1A2028; --ts: #7A8694; --tm: #B0B8C4;
   --ac: #3B7CB8; --ac-glow: rgba(59,124,184,0.12);
   --dg: #C0392B; --wn: #B87210; --ok: #2E8B57;
-  --c1: #3B7CB8; --c2: #4080B5; --c3: #2E8B57; --c4: #9A6ABB;
-  --c1n: 'Steel'; --c2n: 'Cobalt'; --c3n: 'Green'; --c4n: 'Plum';
+  --c1: #E2A032; --c2: #3B7CB8; --c3: #2E8B57; --c4: #C25D8A;
+  --c1n: 'Amber'; --c2n: 'Steel'; --c3n: 'Green'; --c4n: 'Rose';
   --rd: 6px; --pd: 20px; --gp: 16px;
   --sh: 0 1px 3px rgba(26,32,40,0.04);
   --gr: 0.015;
@@ -67,6 +70,7 @@
    Claritas through viriditas — light received by living matter
    ─────────────────────────────────────────────── */
 .t-scriptorium {
+  color-scheme: dark;
   --ff: 'Nunito', sans-serif;
   --bg: #1C211C; --sf: #2A322A; --sd: #232B23; --bd: transparent;
   --tx: #EAF0E8; --ts: #B8C8B4; --tm: #6A7A66;

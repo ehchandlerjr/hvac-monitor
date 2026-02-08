@@ -15,19 +15,19 @@ const DERIVATIVE_THRESHOLD = 0.05; // °F per 5-min for HVAC cycle detection
 
 const ZONES = [
   {
-    id: 'teddys_room', name: "Teddy's Room", hvac: 'boys_rooms', floor: 2,
+    id: 'teddys_room', name: "Teddy's Room", hvac: 'boys_rooms', floor: 3,
     adjacent: ['eliots_room', 'master'],
     sensors: [{ id: "teddy's_room___sensor___temperature_and_relative_humidity", label: "Teddy's Sensor" }],
     svg: { x: 10, y: 10, w: 180, h: 130, cx: 100 },
   },
   {
-    id: 'eliots_room', name: "Eliot's Room", hvac: 'boys_rooms', floor: 2,
+    id: 'eliots_room', name: "Eliot's Room", hvac: 'boys_rooms', floor: 3,
     adjacent: ['teddys_room', 'master'],
     sensors: [{ id: "eliot's_room___sensor___temperature_and_relative_humidity", label: "Eliot's Sensor" }],
     svg: { x: 200, y: 10, w: 180, h: 130, cx: 290 },
   },
   {
-    id: 'master', name: 'Master Bedroom', hvac: 'master', floor: 2,
+    id: 'master', name: 'Master Bedroom', hvac: 'master', floor: 3,
     adjacent: ['teddys_room', 'eliots_room'],
     sensors: [{ id: 'master_bedroom___sensor___temperature_and_relative_humidity', label: 'Master Sensor' }],
     svg: { x: 10, y: 150, w: 180, h: 130, cx: 100 },

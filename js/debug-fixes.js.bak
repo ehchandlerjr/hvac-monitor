@@ -170,36 +170,3 @@ renderCarpetPlot = function(zones) {
 
 // Force re-render NOW
 if (lastData) renderAll(lastData, chartHours);
-
-// === SIDS SAFETY ALERT — Master Bedroom (Christopher's bassinet) ===
-// Source: Japanese pediatric guidelines (SHASE/AIJ), cross-lingual synthesis v2
-// Safe infant sleep range: 18-20C (64-68F) per Japanese guidelines, 68-72F per AAP
-// DANGER: >77F (25C) continuous 30+ min nighttime = SIDS thermal risk
-// WARNING: >74F continuous 30+ min nighttime = above safe range
-// Active window: 22:00-06:00
-var _origProcessData = processData;
-processData = function(rawReadings, rawWeather) {
-  var data = _origProcessData(rawReadings, rawWeather);
-  var now = new Date();
-  var hour = now.getHours();
-  var isNight = (hour >= 22 || hour < 6);
-  var master = data.zones.find(function(z) { return z.id === 'master'; });
-  if (isNight && master && master.timeSeries.length > 0) {
-    var cutoff = new Date(Date.now() - 30 * 60000);
-    var recent = master.timeSeries.filter(function(p) { return p.ts >= cutoff; });
-    if (recent.length >= 3) {
-      if (recent.every(function(p) { return p.temp > 77; })) {
-        data.anomalies.unshift({
-          level: 'danger',
-          msg: '\u26a0 SIDS RISK: Master Bedroom ' + master.avgTemp.toFixed(1) + '\u00b0F \u2014 exceeds 77\u00b0F (25\u00b0C) safe infant sleep limit for 30+ min'
-        });
-      } else if (recent.every(function(p) { return p.temp > 74; })) {
-        data.anomalies.unshift({
-          level: 'warning',
-          msg: '\u26a0 Nursery caution: Master Bedroom ' + master.avgTemp.toFixed(1) + '\u00b0F \u2014 above 68\u201372\u00b0F infant sleep range for 30+ min'
-        });
-      }
-    }
-  }
-  return data;
-};

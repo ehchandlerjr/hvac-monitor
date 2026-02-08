@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 SmartThings Temperature Logger — Self-Healing Edition
-Pulls event history + upserts to Supabase (idempotent, gap-filling)
+Pulls event history via /v1/history/devices + upserts to Supabase
 """
 import os, sys
 from datetime import datetime, timezone, timedelta
@@ -69,33 +69,38 @@ def get_smartthings_devices():
         resp.raise_for_status()
         return resp.json().get("items",[])
 
-def get_device_history(device_id, since):
+def get_device_history(device_id):
+    """Pull device history from /v1/history/devices endpoint."""
     headers = {"Authorization":f"Bearer {ST_TOKEN}"}
-    all_events = []
-    with httpx.Client(timeout=30) as client:
-        url = f"{ST_API}/devices/{device_id}/events"
-        params = {"startDate":since.strftime("%Y-%m-%dT%H:%M:%S.000Z"),"limit":200}
+    all_items = []
+    with httpx.Client(timeout=60) as client:
+        url = f"{ST_API}/history/devices"
+        params = {"deviceId": device_id, "limit": 200}
+        page = 0
         while url:
             resp = client.get(url, headers=headers, params=params)
             resp.raise_for_status()
             data = resp.json()
             items = data.get("items",[])
-            all_events.extend(items)
+            all_items.extend(items)
+            page += 1
             nl = data.get("_links",{}).get("next",{}).get("href")
-            if nl and len(items)>0: url=nl; params={}
+            if nl and len(items) > 0: url=nl; params={}
             else: url=None
-    return all_events
+    return all_items
 
-def events_to_readings(events):
+def history_to_readings(items, since):
+    """Convert history items to readings, filtering to lookback window."""
     buckets = {}
-    for event in events:
-        attr = event.get("attribute","")
-        value = event.get("value")
-        unit = event.get("unit","")
-        ts_str = event.get("eventTime", event.get("stateChange",""))
+    for item in items:
+        attr = item.get("attribute", item.get("attributeName",""))
+        value = item.get("value")
+        unit = item.get("unit","")
+        ts_str = item.get("eventTime") or item.get("createdDate") or item.get("stateChange") or ""
         if not ts_str or value is None: continue
         try: ts = datetime.fromisoformat(ts_str.replace("Z","+00:00"))
         except: continue
+        if ts < since: continue
         bk = ts.replace(second=0, microsecond=0).isoformat()
         if bk not in buckets: buckets[bk] = {"timestamp":bk}
         if attr == "temperature":
@@ -123,15 +128,15 @@ def main():
         device_id = device["deviceId"]
         device_label = device.get("label", device.get("name","unknown"))
         try:
-            events = get_device_history(device_id, since)
-            readings = events_to_readings(events)
+            items = get_device_history(device_id)
+            readings = history_to_readings(items, since)
             sensor_id = device_label.lower().replace(" ","_").replace("-","_")
             for reading in readings:
                 row = {"timestamp":reading["timestamp"],"sensor_id":sensor_id,"device_id":device_id,
                     "temp_f":reading.get("temp_f"),"humidity_pct":reading.get("humidity_pct"),
                     "battery_pct":reading.get("battery_pct"),**weather}
                 all_rows.append(row)
-            print(f"  {sensor_id}: {len(events)} events -> {len(readings)} readings")
+            print(f"  {sensor_id}: {len(items)} events -> {len(readings)} readings")
         except Exception as e:
             print(f"  Error reading {device_label}: {e}", file=sys.stderr)
     if not all_rows:
@@ -147,10 +152,6 @@ def main():
         except Exception as e:
             print(f"  Error upserting batch {i//50}: {e}", file=sys.stderr)
     print(f"  Upserted {total} rows ({len(all_rows)} attempted)")
-    print("\n=== Device Discovery ===")
-    for device in temp_sensors:
-        label = device.get("label",device.get("name"))
-        print(f"  '{label}' -> '{device['deviceId'][:8]}...'")
 
 if __name__ == "__main__":
     main()

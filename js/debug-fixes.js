@@ -300,3 +300,6 @@ window._exportSidsLog = function() {
   a.download = 'sids-log-' + new Date().toISOString().slice(0, 10) + '.json';
   a.click();
 };
+
+// Force refresh so wrappers take effect immediately
+setTimeout(refresh, 500);

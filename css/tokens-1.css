@@ -1,0 +1,83 @@
+/* ============================================================
+   FOUR MODES OF CLARITAS
+   "Ad pulchritudinem tria requiruntur" — S.T. I, Q. 39, Art. 8
+   ============================================================ */
+
+/* ── VELLUM — The Vatican Library ──────────────────
+   Benedictine · Kataphatic × Abundant
+   Claritas as direct material radiance (lux)
+   ─────────────────────────────────────────────── */
+.t-vellum {
+  --ff: Georgia, 'Times New Roman', serif;
+  --bg: #FAF8F5; --sf: #FFFEFA; --sd: #F5F2ED; --bd: #E8E4DD;
+  --tx: #1A1612; --ts: #6B6560; --tm: #A8A29E;
+  --ac: #A67A2E; --ac-glow: rgba(166,122,46,0.15);
+  --dg: #C0392B; --wn: #C26A00; --ok: #5A8A5E;
+  --c1: #C7923E; --c2: #8B6E3E; --c3: #6A8A6A; --c4: #8A6A8A;
+  --c1n: 'Gold'; --c2n: 'Brown'; --c3n: 'Sage'; --c4n: 'Mauve';
+  --rd: 8px; --pd: 24px; --gp: 24px;
+  --sh: 0 2px 12px rgba(26,22,18,0.08);
+  --gr: 0.025; --gz: none; --go: 0;
+  --hsc: 1.02; --htr: -3px; --hdur: 200ms;
+  --lt: none; --ls: 0.01em; --lls: 0.01em;
+}
+
+/* ── TENEBRAE — The Carthusian Cell ────────────────
+   Carthusian · Apophatic × Restrained
+   Claritas through apophasis — gold persisting through darkness
+   ─────────────────────────────────────────────── */
+.t-tenebrae {
+  --ff: Georgia, 'Times New Roman', serif;
+  --bg: #1A1714; --sf: #282422; --sd: #221F1C; --bd: #3D3935;
+  --tx: #F5F0E8; --ts: #C5BEB4; --tm: #7A756E;
+  --ac: #E5B55C; --ac-glow: rgba(229,181,92,0.2);
+  --dg: #E57373; --wn: #FFB74D; --ok: #81C784;
+  --c1: #E5B55C; --c2: #C27040; --c3: #81C784; --c4: #CE93D8;
+  --c1n: 'Gold'; --c2n: 'Copper'; --c3n: 'Green'; --c4n: 'Lilac';
+  --rd: 8px; --pd: 24px; --gp: 24px;
+  --sh: inset 0 1px 0 rgba(229,181,92,0.06);
+  --gr: 0.045;
+  --gz: radial-gradient(ellipse at 50% 0%, rgba(180,140,80,0.02) 0%, transparent 70%); --go: 1;
+  --hsc: 1.0; --htr: 0px; --hdur: 250ms;
+  --lt: none; --ls: 0.01em; --lls: 0.01em;
+}
+
+/* ── LAUDS — The Dominican School ──────────────────
+   Dominican · Kataphatic × Restrained
+   Claritas as intellectual precision — form without mediation
+   ─────────────────────────────────────────────── */
+.t-lauds {
+  --ff: 'Inter', -apple-system, sans-serif;
+  --bg: #F4F6F8; --sf: #FFFFFF; --sd: #EDF0F3; --bd: #D1D8DE;
+  --tx: #1A2028; --ts: #7A8694; --tm: #B0B8C4;
+  --ac: #3B7CB8; --ac-glow: rgba(59,124,184,0.12);
+  --dg: #C0392B; --wn: #B87210; --ok: #2E8B57;
+  --c1: #E2A032; --c2: #3B7CB8; --c3: #2E8B57; --c4: #C25D8A;
+  --c1n: 'Amber'; --c2n: 'Steel'; --c3n: 'Green'; --c4n: 'Rose';
+  --rd: 6px; --pd: 20px; --gp: 16px;
+  --sh: 0 1px 3px rgba(26,32,40,0.04);
+  --gr: 0.015;
+  --gz: linear-gradient(135deg, rgba(91,140,180,0.03) 0%, transparent 50%); --go: 1;
+  --hsc: 1.005; --htr: 0px; --hdur: 100ms;
+  --lt: uppercase; --ls: -0.01em; --lls: 0.08em;
+}
+
+/* ── SCRIPTORIUM — The Cathedral Grove ─────────────
+   Franciscan · Apophatic × Abundant
+   Claritas through viriditas — light received by living matter
+   ─────────────────────────────────────────────── */
+.t-scriptorium {
+  --ff: 'Nunito', sans-serif;
+  --bg: #1C211C; --sf: #2A322A; --sd: #232B23; --bd: transparent;
+  --tx: #EAF0E8; --ts: #B8C8B4; --tm: #6A7A66;
+  --ac: #D4A03C; --ac-glow: rgba(212,160,60,0.15);
+  --dg: #E86A6A; --wn: #FFB74D; --ok: #81C784;
+  --c1: #D4A03C; --c2: #70B090; --c3: #B8C864; --c4: #CE93D8;
+  --c1n: 'Gold'; --c2n: 'Sage'; --c3n: 'Lime'; --c4n: 'Lilac';
+  --rd: 16px; --pd: 28px; --gp: 24px;
+  --sh: 0 4px 20px rgba(0,0,0,0.15);
+  --gr: 0.06;
+  --gz: radial-gradient(ellipse at 30% 20%, rgba(120,160,100,0.03) 0%, transparent 60%); --go: 1;
+  --hsc: 1.0; --htr: 0px; --hdur: 300ms;
+  --lt: none; --ls: 0.01em; --lls: 0.08em;
+}

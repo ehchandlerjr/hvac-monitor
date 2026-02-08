@@ -230,7 +230,7 @@ setInterval(function() {
       if (ptTime >= cutoff30) recent.push({ temp: pt.temp, time: ptTime });
     }
 
-    if (recent.length < 3) {
+    if (recent.length < 1) {
       if (tk) tk.textContent = msg + 'recent<3 (' + recent.length + ') tsType=' + tsType + ' val=' + tsVal;
       return;
     }

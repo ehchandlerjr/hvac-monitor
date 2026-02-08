@@ -10,7 +10,7 @@ const TABLE = 'readings';
 const POLL_MS = 300000;
 const HISTORY_HOURS = 168; // 7 days for carpet plot
 const STALE_MINUTES = 120;
-const SETPOINT = 70; // assumed setpoint °F
+const SETPOINT = 71; // assumed setpoint °F
 const DERIVATIVE_THRESHOLD = 0.05; // °F per 5-min for HVAC cycle detection
 
 const ZONES = [

@@ -1072,3 +1072,44 @@ async function refresh() {
   refresh();
   setInterval(refresh, POLL_MS);
 })();
+
+// DEBUG — remove after testing
+window._hvacDebug = async function() {
+  const [readings, weather] = await Promise.all([fetchReadings(), fetchWeather()]);
+  const data = processData(readings, weather);
+  const d = data.diagnostics;
+  const lines = [
+    '=== HVAC DEBUG ===',
+    'Total readings: ' + data.readingCount,
+    'Zones online: ' + data.zones.filter(z => z.online).length + '/' + data.zones.length,
+    'Weather: ' + (data.weather ? data.weather.tempF + 'F' : 'NULL'),
+    '',
+  ];
+  for (const z of data.zones) {
+    lines.push(z.name + ': ' + (z.avgTemp ? z.avgTemp.toFixed(1) + 'F' : 'offline') + ', timeSeries=' + z.timeSeries.length + ' pts');
+  }
+  lines.push('');
+  for (const r of d.zoneResults) {
+    lines.push(r.zoneName + ': duty=' + (r.dutyCycle != null ? (r.dutyCycle*100).toFixed(0)+'%' : 'null') + 
+      ' recovery=' + (r.avgRecoveryRate != null ? r.avgRecoveryRate.toFixed(1) : 'null') +
+      ' drift=' + (r.driftRate != null ? (r.driftRate*100).toFixed(1)+'%/hr' : 'null') +
+      ' tau=' + (r.tau != null ? r.tau.toFixed(1)+'h' : 'null') +
+      ' segments=' + r.segments.length + ' cycles=' + r.cycles.length);
+  }
+  lines.push('');
+  lines.push('Faults: ' + d.faults.length);
+  for (const f of d.faults) lines.push('  [' + f.level + '] ' + f.type + ': ' + f.msg);
+  lines.push('Couplings: ' + d.couplings.map(c => c.a + '<>' + c.b + '=' + (c.r != null ? c.r.toFixed(2) : 'null')).join(', '));
+  
+  // Check DOM elements exist
+  lines.push('');
+  lines.push('DOM check:');
+  for (const id of ['bulletCharts','dutyGantt','carpetPlot','diagnosticSummary','analysisGrid']) {
+    const el = document.getElementById(id);
+    lines.push('  #' + id + ': ' + (el ? 'exists, innerHTML=' + el.innerHTML.length + ' chars' : 'MISSING'));
+  }
+  
+  alert(lines.join('\n'));
+  console.log(lines.join('\n'));
+};
+window._hvacDebug();

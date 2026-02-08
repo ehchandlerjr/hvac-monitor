@@ -326,7 +326,7 @@ function svgEl(tag,attrs={}){
 }
 
 // ── MAIN LOOP ────────────────────────────────────
-let chartHours = 6;
+let chartHours = 24;
 let lastData = null;
 
 async function refresh() {

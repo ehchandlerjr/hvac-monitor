@@ -203,3 +203,18 @@ processData = function(rawReadings, rawWeather) {
   }
   return data;
 };
+
+// === SIDS STATUS INDICATOR in status bar ===
+var _origRenderStatus = renderStatus;
+renderStatus = function(zones, readingCount, weather) {
+  _origRenderStatus(zones, readingCount, weather);
+  var sb = document.getElementById('statusBar');
+  if (!sb) return;
+  var hour = new Date().getHours();
+  var isNight = (hour >= 22 || hour < 6);
+  var master = zones.find(function(z) { return z.id === 'master'; });
+  var temp = master && master.avgTemp != null ? master.avgTemp.toFixed(1) + '\u00b0F' : '?';
+  var dot = isNight ? '\ud83d\udfe2' : '\u26aa';
+  var label = isNight ? 'SIDS monitor active' : 'SIDS standby';
+  sb.innerHTML += '<span style="margin-left:8px;font-size:0.85em;">' + dot + ' ' + label + ' (Master: ' + temp + ')</span>';
+};

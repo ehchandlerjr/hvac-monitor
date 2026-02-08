@@ -9,24 +9,20 @@ renderFloorPlan = function(zones) {
   svg.style.cssText = 'width:100%;display:block;';
   for (const z of zones) {
     const s = z.svg;
-    // Glow behind room
     svg.appendChild(svgEl('rect', {
       x: s.x - 1, y: s.y - 1, width: s.w + 2, height: s.h + 2, rx: 10,
       fill: 'none', stroke: ac, 'stroke-width': 4, opacity: z.online ? 0.15 : 0,
     }));
-    // Room box — strong fill
     svg.appendChild(svgEl('rect', {
       x: s.x, y: s.y, width: s.w, height: s.h, rx: 8,
       fill: z.online ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.03)',
       stroke: z.online ? ac : tm,
       'stroke-width': z.online ? 3 : 1,
     }));
-    // Room name
     var label = svgEl('text', { x: s.cx, y: s.y + 38, 'text-anchor': 'middle', fill: ts, 'font-size': '13', 'font-weight': '600' });
     label.style.fontFamily = cssVar('--ff');
     label.textContent = z.name;
     svg.appendChild(label);
-    // Big temperature
     var temp = svgEl('text', {
       x: s.cx, y: s.y + 72, 'text-anchor': 'middle',
       fill: z.online ? tx : tm,
@@ -36,13 +32,11 @@ renderFloorPlan = function(zones) {
     temp.style.fontFamily = cssVar('--ff');
     temp.textContent = z.avgTemp != null ? z.avgTemp.toFixed(1) + '\u00b0' : 'No data';
     svg.appendChild(temp);
-    // Humidity
     if (z.online && z.humidity != null) {
       var hum = svgEl('text', { x: s.cx, y: s.y + 92, 'text-anchor': 'middle', fill: tm, 'font-size': '11' });
       hum.textContent = z.humidity.toFixed(0) + '% RH';
       svg.appendChild(hum);
     }
-    // Rate arrow
     if (z.online && z.rate && z.rate.dir !== 'stable') {
       var arrow = z.rate.dir === 'rising' ? '\u25b2' : '\u25bc';
       var rateColor = z.rate.dir === 'rising' ? cssVar('--dg') : cssVar('--ok');
@@ -171,50 +165,88 @@ renderCarpetPlot = function(zones) {
 // Force re-render NOW
 if (lastData) renderAll(lastData, chartHours);
 
-// === SIDS THERMAL SAFETY MONITOR v3 — standalone interval ===
-// Master Bedroom (Christopher's bassinet)
-//
-// EVIDENCE BASE:
-//   AAP 2022 (Pediatrics, e2022057990): 68-72F recommended, no hard threshold
-//     defined; "definition of overheating varies across studies"
-//   Cleveland Clinic: 65-70F recommended range
-//   PMC/Frontiers (PMC9051231): hyperthermia/thermal stress as continuous
-//     SIDS risk factor; profuse sweating found at SIDS scenes
-//   Sleep Foundation / Pampers / Smart Sleep Coach: 75F (24C) flagged as
-//     overheating onset
-//   Japanese pediatric guidelines: 18-20C (64-68F)
-//
-// TIERS (all require 30 min sustained):
-//   INFO    >72F — above AAP recommended ceiling
-//   WARNING >75F — overheating onset per multiple sources
-//   DANGER  >78F — clear thermal stress territory
-//
-// DURATION: 30 min sustained = all readings in window must exceed threshold.
-//   Prevents false alarms from brief spikes (door opened, shower steam, etc.)
-//
-// LOGGING: All WARNING and DANGER events are timestamped and stored in
-//   window._sidsLog for export.
+// === SIDS DIAGNOSTIC TICKER ===
+// Visible debug info at top-right corner — remove after confirmed working
+(function() {
+  var ticker = document.createElement('div');
+  ticker.id = 'sidsTicker';
+  ticker.style.cssText = 'position:fixed;top:0;right:0;background:rgba(0,0,0,0.85);color:#0f0;' +
+    'font-family:monospace;font-size:10px;padding:4px 8px;z-index:99999;max-width:60%;' +
+    'word-wrap:break-word;border-bottom-left-radius:6px;';
+  ticker.textContent = 'SIDS: init';
+  document.body.appendChild(ticker);
+})();
 
 window._sidsLog = window._sidsLog || [];
+window._sidsTickCount = 0;
 
 setInterval(function() {
+  window._sidsTickCount++;
+  var tk = document.getElementById('sidsTicker');
+  var msg = 'tick#' + window._sidsTickCount + ' ';
+
   try {
-    var data = window._hvacData ? window._hvacData() : (typeof lastData !== 'undefined' ? lastData : null);
-    if (!data || !data.zones) return;
+    // Step 1: get data
+    var data = window._hvacData ? window._hvacData() : null;
+    if (!data) {
+      if (tk) tk.textContent = msg + 'NO DATA (hvacData=' + (typeof window._hvacData) + ')';
+      return;
+    }
+    if (!data.zones) {
+      if (tk) tk.textContent = msg + 'data exists but no .zones';
+      return;
+    }
 
-    var master = data.zones.find(function(z) { return z.id === 'master'; });
-    if (!master || !master.timeSeries || master.timeSeries.length < 3) return;
+    // Step 2: find master
+    var master = null;
+    for (var i = 0; i < data.zones.length; i++) {
+      if (data.zones[i].id === 'master') { master = data.zones[i]; break; }
+    }
+    if (!master) {
+      if (tk) tk.textContent = msg + 'no master zone. ids=' + data.zones.map(function(z){return z.id;}).join(',');
+      return;
+    }
+    if (!master.timeSeries || master.timeSeries.length < 3) {
+      var tsLen = master.timeSeries ? master.timeSeries.length : 0;
+      if (tk) tk.textContent = msg + 'master ts too short: ' + tsLen;
+      return;
+    }
 
+    // Step 3: check ts format
+    var sample = master.timeSeries[master.timeSeries.length - 1];
+    var tsType = typeof sample.ts;
+    var tsVal = String(sample.ts).substring(0, 25);
+
+    // Step 4: filter recent 30 min — handle any ts format
     var now = Date.now();
     var cutoff30 = now - 30 * 60000;
-    var recent = master.timeSeries.filter(function(p) { return p.ts.getTime() >= cutoff30; });
-    if (recent.length < 3) return;
+    var recent = [];
+    for (var j = 0; j < master.timeSeries.length; j++) {
+      var pt = master.timeSeries[j];
+      var ptTime;
+      if (pt.ts instanceof Date) ptTime = pt.ts.getTime();
+      else if (typeof pt.ts === 'number') ptTime = pt.ts;
+      else ptTime = new Date(pt.ts).getTime();
+      if (ptTime >= cutoff30) recent.push({ temp: pt.temp, time: ptTime });
+    }
 
+    if (recent.length < 3) {
+      if (tk) tk.textContent = msg + 'recent<3 (' + recent.length + ') tsType=' + tsType + ' val=' + tsVal;
+      return;
+    }
+
+    // Step 5: compute temps
     var hour = new Date().getHours();
     var isNight = (hour >= 22 || hour < 6);
-    var minTemp = Math.min.apply(null, recent.map(function(p) { return p.temp; }));
-    var avgTemp = recent.reduce(function(s, p) { return s + p.temp; }, 0) / recent.length;
+    var minTemp = recent[0].temp;
+    var sum = 0;
+    for (var k = 0; k < recent.length; k++) {
+      if (recent[k].temp < minTemp) minTemp = recent[k].temp;
+      sum += recent[k].temp;
+    }
+    var avgTemp = sum / recent.length;
 
+    // Step 6: determine tier
     var tier = null, tierLevel = '', tierLabel = '';
 
     if (minTemp > 78) {
@@ -234,21 +266,29 @@ setInterval(function() {
         avgTemp.toFixed(1) + '\u00b0F \u2014 above AAP recommended ceiling of 72\u00b0F.';
     }
 
+    // Update ticker with full diagnostic
+    if (tk) {
+      tk.style.color = tier === 'DANGER' ? '#f55' : tier === 'WARNING' ? '#ff0' : tier === 'INFO' ? '#fa0' : '#0f0';
+      tk.textContent = msg + (tier || 'OK') + ' min=' + minTemp.toFixed(1) +
+        ' avg=' + avgTemp.toFixed(1) + ' n=' + recent.length +
+        ' tsType=' + tsType + ' log=' + window._sidsLog.length;
+    }
+
     // === ANOMALY BANNER ===
     var sidsBanner = document.getElementById('sidsBanner');
     if (tier && tierLabel) {
       if (!sidsBanner) {
         sidsBanner = document.createElement('div');
         sidsBanner.id = 'sidsBanner';
-        sidsBanner.className = 'anomaly-banner';
-        var ab = document.getElementById('anomalyBanner');
-        if (ab) ab.parentNode.insertBefore(sidsBanner, ab);
-        else {
-          var dash = document.querySelector('.dashboard');
-          if (dash) dash.insertBefore(sidsBanner, dash.children[1]);
-        }
+        sidsBanner.style.cssText = 'padding:12px 16px;margin:8px 0;border-radius:8px;font-size:0.9em;';
+        if (tierLevel === 'danger') sidsBanner.style.cssText += 'background:#fee;border:2px solid #c00;color:#900;';
+        else if (tierLevel === 'warning') sidsBanner.style.cssText += 'background:#fff8e1;border:2px solid #f90;color:#7a4f01;';
+        else sidsBanner.style.cssText += 'background:#e8f4fd;border:2px solid #4a9eda;color:#1a5276;';
+        var dash = document.querySelector('.dashboard');
+        if (dash && dash.children.length > 1) dash.insertBefore(sidsBanner, dash.children[1]);
+        else if (dash) dash.appendChild(sidsBanner);
       }
-      sidsBanner.innerHTML = '<div class="anomaly-item" data-level="' + tierLevel + '">' + tierLabel + '</div>';
+      sidsBanner.innerHTML = tierLabel;
       sidsBanner.style.display = '';
     } else if (sidsBanner) {
       sidsBanner.style.display = 'none';
@@ -264,15 +304,15 @@ setInterval(function() {
         existing.style.cssText = 'margin-left:8px;font-size:0.85em;';
         sb.appendChild(existing);
       }
-      var temp = master.avgTemp != null ? master.avgTemp.toFixed(1) + '\u00b0F' : '?';
-      var dot, label;
-      if (tier === 'DANGER') { dot = '\ud83d\udd34'; label = 'SIDS DANGER'; }
-      else if (tier === 'WARNING') { dot = '\ud83d\udfe1'; label = 'SIDS WARNING'; }
-      else if (tier === 'INFO') { dot = '\ud83d\udfe0'; label = 'SIDS above range'; }
-      else if (isNight) { dot = '\ud83d\udfe2'; label = 'SIDS monitor OK'; }
-      else { dot = '\u26aa'; label = 'SIDS monitor'; }
+      var tempStr = master.avgTemp != null ? master.avgTemp.toFixed(1) + '\u00b0F' : '?';
+      var dot, lbl;
+      if (tier === 'DANGER') { dot = '\ud83d\udd34'; lbl = 'SIDS DANGER'; }
+      else if (tier === 'WARNING') { dot = '\ud83d\udfe1'; lbl = 'SIDS WARNING'; }
+      else if (tier === 'INFO') { dot = '\ud83d\udfe0'; lbl = 'SIDS above range'; }
+      else if (isNight) { dot = '\ud83d\udfe2'; lbl = 'SIDS monitor OK'; }
+      else { dot = '\u26aa'; lbl = 'SIDS monitor'; }
       var logNote = window._sidsLog.length > 0 ? ' \u00b7 ' + window._sidsLog.length + ' event(s)' : '';
-      existing.innerHTML = dot + ' ' + label + ' (Master: ' + temp + ')' + logNote;
+      existing.innerHTML = dot + ' ' + lbl + ' (Master: ' + tempStr + ')' + logNote;
     }
 
     // === LOG WARNING/DANGER ===
@@ -291,12 +331,11 @@ setInterval(function() {
       }
     }
   } catch (e) {
-    console.error('[SIDS] Error:', e);
+    if (tk) { tk.style.color = '#f00'; tk.textContent = msg + 'ERR: ' + e.message; }
   }
-}, 10000);
+}, 5000);
 
 // === SIDS LOG EXPORT ===
-// Run in browser console: window._exportSidsLog()
 window._exportSidsLog = function() {
   var blob = new Blob([JSON.stringify(window._sidsLog, null, 2)], {type: 'application/json'});
   var a = document.createElement('a');

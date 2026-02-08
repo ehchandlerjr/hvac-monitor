@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 One-time backfill: pull SmartThings device history via /v1/history/devices
+Requires locationId parameter.
 """
 import os, sys
 from datetime import datetime, timezone, timedelta
@@ -14,29 +15,43 @@ SUPABASE_KEY = os.environ["SUPABASE_KEY"]
 
 BACKFILL_DAYS = 7
 
+def get_location_id():
+    """Get the first SmartThings location ID."""
+    with httpx.Client(timeout=30) as client:
+        resp = client.get(f"{ST_API}/locations", headers={"Authorization": f"Bearer {ST_TOKEN}"})
+        resp.raise_for_status()
+        locations = resp.json().get("items", [])
+        if not locations:
+            raise Exception("No locations found")
+        loc = locations[0]
+        print(f"  Location: {loc.get('name')} ({loc['locationId']})")
+        return loc["locationId"]
+
 def get_smartthings_devices():
     with httpx.Client(timeout=30) as client:
         resp = client.get(f"{ST_API}/devices", headers={"Authorization": f"Bearer {ST_TOKEN}"})
         resp.raise_for_status()
         return resp.json().get("items", [])
 
-def get_device_history(device_id):
-    """Pull device history from /v1/history/devices endpoint."""
+def get_device_history(device_id, location_id):
+    """Pull device history from /v1/history/devices with locationId."""
     headers = {"Authorization": f"Bearer {ST_TOKEN}"}
     all_items = []
     with httpx.Client(timeout=60) as client:
         url = f"{ST_API}/history/devices"
-        params = {"deviceId": device_id, "limit": 200}
+        params = {"deviceId": device_id, "locationId": location_id, "limit": 200}
         page = 0
         while url:
             resp = client.get(url, headers=headers, params=params)
-            resp.raise_for_status()
+            # Print response for debugging if error
+            if resp.status_code != 200:
+                print(f"    HTTP {resp.status_code}: {resp.text[:500]}")
+                resp.raise_for_status()
             data = resp.json()
             items = data.get("items", [])
             all_items.extend(items)
             page += 1
             print(f"    Page {page}: {len(items)} events (total: {len(all_items)})")
-            # Pagination
             nl = data.get("_links", {}).get("next", {}).get("href")
             if nl and len(items) > 0:
                 url = nl
@@ -46,27 +61,20 @@ def get_device_history(device_id):
     return all_items
 
 def history_to_readings(items):
-    """Convert /v1/history/devices items into timestamped readings."""
     buckets = {}
     for item in items:
         attr = item.get("attribute", item.get("attributeName", ""))
         value = item.get("value")
         unit = item.get("unit", "")
-        # Try multiple timestamp fields
         ts_str = item.get("eventTime") or item.get("createdDate") or item.get("stateChange") or ""
-        if not ts_str or value is None:
-            continue
-        try:
-            ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
-        except:
-            continue
+        if not ts_str or value is None: continue
+        try: ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+        except: continue
         bk = ts.replace(second=0, microsecond=0).isoformat()
-        if bk not in buckets:
-            buckets[bk] = {"timestamp": bk}
+        if bk not in buckets: buckets[bk] = {"timestamp": bk}
         if attr == "temperature":
             temp = float(value)
-            if unit == "C":
-                temp = temp * 9 / 5 + 32
+            if unit == "C": temp = temp * 9 / 5 + 32
             buckets[bk]["temp_f"] = round(temp, 2)
         elif attr == "humidity":
             buckets[bk]["humidity_pct"] = round(float(value), 2)
@@ -80,6 +88,7 @@ def main():
     print(f"=== BACKFILL: {since.date()} to {now.date()} ({BACKFILL_DAYS} days) ===")
 
     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+    location_id = get_location_id()
     devices = get_smartthings_devices()
     temp_sensors = [
         d for d in devices
@@ -87,7 +96,7 @@ def main():
                for comp in d.get("components", [])
                for cap in comp.get("capabilities", []))
     ]
-    print(f"Found {len(temp_sensors)} sensor(s)")
+    print(f"  Found {len(temp_sensors)} sensor(s)")
 
     no_weather = {
         "outdoor_temp_f": None, "outdoor_humidity_pct": None,
@@ -103,14 +112,12 @@ def main():
         device_label = device.get("label", device.get("name", "unknown"))
         sensor_id = device_label.lower().replace(" ", "_").replace("-", "_")
         print(f"\n  {sensor_id} ({device_label})")
-        print(f"  Device ID: {device_id}")
 
         try:
-            items = get_device_history(device_id)
-            # Debug: print first item structure
+            items = get_device_history(device_id, location_id)
             if items:
-                print(f"  Sample item keys: {list(items[0].keys())}")
-                print(f"  Sample item: {items[0]}")
+                print(f"  Sample keys: {list(items[0].keys())}")
+                print(f"  Sample: {items[0]}")
             readings = history_to_readings(items)
             print(f"  {len(items)} events -> {len(readings)} readings")
 

@@ -344,346 +344,156 @@ window._exportSidsLog = function() {
   a.click();
 };
 
-// === S2 DYNAMIC SETPOINT — Finnish Sisäilmastoluokitus 2018 ===
-// Source: VTT/Tampere/Aalto indoor climate classification
-// S2 ("good" tier) target = 21.5 + 0.2 × max(0, min(T_out_24h_C, 20)) °C
-// S2 allowed band: target ±1.0°C (±1.8°F)
-//
-// Computes dynamic reference line from 24h outdoor temp rolling average.
-// Drawn on time-series chart alongside thermostat setpoint.
-// Key insight: tells landlord "given outdoor conditions, a well-performing
-// building should hold X°F — yours is overshooting/undershooting by Y°F."
+// === S2 DYNAMIC SETPOINT v2 — Finnish Sisäilmastoluokitus 2018 ===
+// No function wrapping — uses MutationObserver + post-render injection
+// to avoid infinite recursion from double-load or script caching.
 
-window._s2 = null;
+(function() {
+  if (window._s2Init) return; // guard against double-load
+  window._s2Init = true;
+  window._s2 = null;
 
-// Wrap refresh() to also fetch weather history for S2 computation
-var _origRefresh = refresh;
-refresh = async function() {
-  await _origRefresh();
-  try {
-    var wh = await fetchWeatherHistory();
-    if (wh && wh.length > 0) {
+  // Compute S2 from weather history (called once per refresh cycle)
+  async function computeS2() {
+    try {
+      var wh = await fetchWeatherHistory();
+      if (!wh || wh.length === 0) return;
       var sum = 0, n = 0;
       for (var i = 0; i < wh.length; i++) {
-        if (wh[i].outdoor_temp_f != null) {
-          sum += wh[i].outdoor_temp_f;
-          n++;
+        if (wh[i].outdoor_temp_f != null) { sum += wh[i].outdoor_temp_f; n++; }
+      }
+      if (n === 0) return;
+      var avgOutF = sum / n;
+      var avgOutC = (avgOutF - 32) * 5 / 9;
+      var s2C = 21.5 + 0.2 * Math.max(0, Math.min(avgOutC, 20));
+      var s2F = s2C * 9 / 5 + 32;
+      window._s2 = {
+        targetF: Math.round(s2F * 10) / 10,
+        targetC: Math.round(s2C * 10) / 10,
+        lowF: Math.round(((s2C - 1) * 9 / 5 + 32) * 10) / 10,
+        highF: Math.round(((s2C + 1.5) * 9 / 5 + 32) * 10) / 10,
+        outdoorAvgF: Math.round(avgOutF * 10) / 10,
+        outdoorAvgC: Math.round(avgOutC * 10) / 10,
+        readings: n
+      };
+      console.log('[S2] Outdoor 24h avg: ' + avgOutF.toFixed(1) + '°F → target: ' + s2F.toFixed(1) + '°F from ' + n + ' pts');
+    } catch (e) {
+      console.warn('[S2] compute error:', e);
+    }
+  }
+
+  // Overlay S2 line onto existing chart SVG
+  function overlayS2() {
+    try {
+      if (!window._s2 || !lastData) return;
+      var container = document.getElementById('tsChart');
+      if (!container) return;
+      var svg = container.querySelector('svg');
+      if (!svg || svg.getAttribute('data-s2')) return; // already overlaid
+      svg.setAttribute('data-s2', '1');
+
+      var s2 = window._s2;
+      var zones = lastData.zones;
+      var hours = parseInt((document.querySelector('#chartTabs .chart-tab.active') || {}).dataset.range || '24', 10);
+      var cutoff = new Date(Date.now() - hours * 3600000);
+
+      var allT = [], allTs = [];
+      for (var i = 0; i < zones.length; i++) {
+        var pts = zones[i].timeSeries.filter(function(p) { return p.ts >= cutoff; });
+        for (var j = 0; j < pts.length; j++) {
+          allT.push(pts[j].temp);
+          allTs.push(pts[j].ts.getTime());
         }
       }
-      if (n > 0) {
-        var avgOutF = sum / n;
-        var avgOutC = (avgOutF - 32) * 5 / 9;
-        var s2C = 21.5 + 0.2 * Math.max(0, Math.min(avgOutC, 20));
-        var s2F = s2C * 9 / 5 + 32;
-        window._s2 = {
-          targetF: Math.round(s2F * 10) / 10,
-          targetC: Math.round(s2C * 10) / 10,
-          lowF: Math.round((s2C - 1) * 9 / 5 + 32 * 10) / 10,
-          highF: Math.round(((s2C + 1.5) * 9 / 5 + 32) * 10) / 10,
-          outdoorAvgF: Math.round(avgOutF * 10) / 10,
-          outdoorAvgC: Math.round(avgOutC * 10) / 10,
-          readings: n
-        };
-        // Fix low calc
-        window._s2.lowF = Math.round(((s2C - 1) * 9 / 5 + 32) * 10) / 10;
-        console.log('[S2] Outdoor 24h avg: ' + avgOutF.toFixed(1) + '°F (' + avgOutC.toFixed(1) + '°C) → S2 target: ' + s2F.toFixed(1) + '°F (' + s2C.toFixed(1) + '°C) from ' + n + ' readings');
+      if (allT.length === 0) return;
+
+      var tMin = Math.floor(Math.min.apply(null, allT) - 1);
+      var tMax = Math.ceil(Math.max.apply(null, allT) + 1);
+      if (s2.targetF < tMin - 2 || s2.targetF > tMax + 2) return;
+
+      var W = 1000, P_l = 50, P_t = 20, P_r = 12, pH = 150;
+      var pW = W - P_l - P_r;
+      function sy(t) { return P_t + pH - ((t - tMin) / (tMax - tMin || 1)) * pH; }
+
+      var ns = 'http://www.w3.org/2000/svg';
+      var firstPoly = svg.querySelector('polyline');
+
+      // Band
+      var rect = document.createElementNS(ns, 'rect');
+      rect.setAttribute('x', P_l);
+      rect.setAttribute('y', sy(Math.min(s2.highF, tMax)));
+      rect.setAttribute('width', pW);
+      rect.setAttribute('height', Math.max(0, sy(Math.max(s2.lowF, tMin)) - sy(Math.min(s2.highF, tMax))));
+      rect.setAttribute('fill', '#2196F3');
+      rect.setAttribute('opacity', '0.06');
+      if (firstPoly) svg.insertBefore(rect, firstPoly); else svg.appendChild(rect);
+
+      // Line
+      var line = document.createElementNS(ns, 'line');
+      line.setAttribute('x1', P_l);
+      line.setAttribute('y1', sy(s2.targetF));
+      line.setAttribute('x2', W - P_r);
+      line.setAttribute('y2', sy(s2.targetF));
+      line.setAttribute('stroke', '#2196F3');
+      line.setAttribute('stroke-width', '1.5');
+      line.setAttribute('stroke-dasharray', '8,3');
+      line.setAttribute('opacity', '0.7');
+      if (firstPoly) svg.insertBefore(line, firstPoly); else svg.appendChild(line);
+
+      // Label
+      var lbl = document.createElementNS(ns, 'text');
+      lbl.setAttribute('x', W - P_r - 4);
+      lbl.setAttribute('y', sy(s2.targetF) - 4);
+      lbl.setAttribute('text-anchor', 'end');
+      lbl.setAttribute('fill', '#2196F3');
+      lbl.setAttribute('font-size', '9');
+      lbl.setAttribute('opacity', '0.8');
+      lbl.textContent = 'S2 ' + s2.targetF.toFixed(1) + '\u00b0F';
+      svg.appendChild(lbl);
+
+      // Legend
+      var leg = document.getElementById('tsLegend');
+      if (leg && leg.innerHTML.indexOf('S2') === -1) {
+        leg.innerHTML += '<div class="legend-item" style="opacity:0.8">' +
+          '<span class="legend-swatch" style="background:#2196F3"></span>' +
+          'S2 target (' + s2.targetF.toFixed(1) + '\u00b0F) \u00b7 Out avg: ' + s2.outdoorAvgF.toFixed(1) + '\u00b0F</div>';
       }
-    }
-  } catch (e) {
-    console.warn('[S2] Weather history fetch failed:', e);
-  }
-};
 
-// Wrap renderChart() to add S2 reference line
-var _origRenderChart = renderChart;
-renderChart = function(zones, hours, diagnostics) { try {
-  _origRenderChart(zones, hours, diagnostics);
-  if (!window._s2) return;
-
-  var container = document.getElementById('tsChart');
-  if (!container) return;
-  var svg = container.querySelector('svg');
-  if (!svg) return;
-
-  var s2 = window._s2;
-
-  // Reconstruct scale functions from the SVG (same logic as renderChart)
-  var cutoff = new Date(Date.now() - hours * 3600000);
-  var series = zones.map(function(z) {
-    return z.timeSeries.filter(function(p) { return p.ts >= cutoff; });
-  }).filter(function(d) { return d.length > 0; });
-
-  if (series.length === 0) return;
-
-  var allT = [];
-  var allTs = [];
-  for (var i = 0; i < series.length; i++) {
-    for (var j = 0; j < series[i].length; j++) {
-      allT.push(series[i][j].temp);
-      allTs.push(series[i][j].ts.getTime());
-    }
-  }
-
-  var tMin = Math.floor(Math.min.apply(null, allT) - 1);
-  var tMax = Math.ceil(Math.max.apply(null, allT) + 1);
-  var W = 1000, P_l = 50, P_t = 20, P_r = 12, P_b = 30;
-  var pW = W - P_l - P_r, pH = 200 - P_t - P_b;
-
-  function sy(t) { return P_t + pH - ((t - tMin) / (tMax - tMin || 1)) * pH; }
-
-  // Only draw if S2 target is within visible range
-  if (s2.targetF < tMin - 2 || s2.targetF > tMax + 2) return;
-
-  // S2 allowed band (target ±1°C = ±1.8°F)
-  var bandLow = s2.lowF;
-  var bandHigh = s2.highF;
-  var bandRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-  bandRect.setAttribute('x', P_l);
-  bandRect.setAttribute('y', sy(Math.min(bandHigh, tMax)));
-  bandRect.setAttribute('width', pW);
-  bandRect.setAttribute('height', Math.max(0, sy(Math.max(bandLow, tMin)) - sy(Math.min(bandHigh, tMax))));
-  bandRect.setAttribute('fill', '#2196F3');
-  bandRect.setAttribute('opacity', '0.06');
-  // Insert before data lines (after grid)
-  var firstPolyline = svg.querySelector('polyline');
-  if (firstPolyline) {
-    svg.insertBefore(bandRect, firstPolyline);
-  } else {
-    svg.appendChild(bandRect);
-  }
-
-  // S2 target line (solid, blue-ish)
-  var line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-  line.setAttribute('x1', P_l);
-  line.setAttribute('y1', sy(s2.targetF));
-  line.setAttribute('x2', W - P_r);
-  line.setAttribute('y2', sy(s2.targetF));
-  line.setAttribute('stroke', '#2196F3');
-  line.setAttribute('stroke-width', '1.5');
-  line.setAttribute('stroke-dasharray', '8,3');
-  line.setAttribute('opacity', '0.7');
-  if (firstPolyline) {
-    svg.insertBefore(line, firstPolyline);
-  } else {
-    svg.appendChild(line);
-  }
-
-  // S2 label
-  var label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-  label.setAttribute('x', W - P_r - 4);
-  label.setAttribute('y', sy(s2.targetF) - 4);
-  label.setAttribute('text-anchor', 'end');
-  label.setAttribute('fill', '#2196F3');
-  label.setAttribute('font-size', '9');
-  label.setAttribute('opacity', '0.8');
-  label.textContent = 'S2 ' + s2.targetF.toFixed(1) + '°F';
-  svg.appendChild(label);
-
-  // Add S2 info to legend
-  var legendEl = document.getElementById('tsLegend');
-  if (legendEl) {
-    legendEl.innerHTML += '<div class="legend-item" style="opacity:0.8">' +
-      '<span class="legend-swatch" style="background:#2196F3"></span>' +
-      'S2 target (' + s2.targetF.toFixed(1) + '°F) · Out avg: ' + s2.outdoorAvgF.toFixed(1) + '°F</div>';
-  }
-} catch(e) { console.warn("[S2] renderChart overlay error:", e); } };
-
-// Wrap renderAnalysis to add S2 deviation metric
-var _origRenderAnalysis = renderAnalysis;
-renderAnalysis = function(zones, weather, spread, anomalies, diagnostics) { try {
-  _origRenderAnalysis(zones, weather, spread, anomalies, diagnostics);
-  if (!window._s2) return;
-  var panel = document.getElementById('analysisPanel');
-  if (!panel) return;
-  var s2 = window._s2;
-
-  // Compute per-zone deviation from S2
-  var deviations = [];
-  for (var i = 0; i < zones.length; i++) {
-    if (zones[i].avgTemp != null) {
-      var dev = zones[i].avgTemp - s2.targetF;
-      deviations.push(zones[i].name + ': ' + (dev >= 0 ? '+' : '') + dev.toFixed(1) + '°F');
-    }
-  }
-
-  if (deviations.length > 0) {
-    var div = document.createElement('div');
-    div.className = 'metric-row';
-    div.innerHTML = '<div class="metric-row"><span class="metric-label">S2 deviation</span>' +
-      '<span class="metric-value" style="font-size:0.85em">' + deviations.join(' · ') + '</span></div>' +
-      '<div class="metric-row"><span class="metric-label" style="opacity:0.6;font-size:0.8em">' +
-      'Finnish S2 target: ' + s2.targetF.toFixed(1) + '°F (' + s2.targetC.toFixed(1) + '°C) · ' +
-      'Outdoor 24h avg: ' + s2.outdoorAvgF.toFixed(1) + '°F · ' + s2.readings + ' readings</span></div>';
-    panel.appendChild(div);
-  }
-} catch(e) { console.warn("[S2] renderAnalysis error:", e); } };
-
-// === S2 DYNAMIC SETPOINT — Finnish Sisäilmastoluokitus 2018 ===
-// Source: VTT/Tampere/Aalto indoor climate classification
-// S2 ("good" tier) target = 21.5 + 0.2 × max(0, min(T_out_24h_C, 20)) °C
-// S2 allowed band: target ±1.0°C (low) / +1.5°C (high)
-//
-// Computes dynamic reference line from 24h outdoor temp rolling average.
-// Drawn on time-series chart alongside thermostat setpoint.
-// Key insight: tells landlord "given outdoor conditions, a well-performing
-// building should hold X°F — yours is overshooting/undershooting by Y°F."
-
-window._s2 = null;
-
-// Wrap refresh() to also fetch weather history for S2 computation
-var _origRefresh = refresh;
-refresh = async function() {
-  await _origRefresh();
-  try {
-    var wh = await fetchWeatherHistory();
-    if (wh && wh.length > 0) {
-      var sum = 0, n = 0;
-      for (var i = 0; i < wh.length; i++) {
-        if (wh[i].outdoor_temp_f != null) {
-          sum += wh[i].outdoor_temp_f;
-          n++;
+      // Analysis panel deviation
+      var panel = document.getElementById('analysisPanel');
+      if (panel && panel.innerHTML.indexOf('S2 deviation') === -1) {
+        var devs = [];
+        for (var k = 0; k < zones.length; k++) {
+          if (zones[k].avgTemp != null) {
+            var dev = zones[k].avgTemp - s2.targetF;
+            devs.push(zones[k].name + ': ' + (dev >= 0 ? '+' : '') + dev.toFixed(1) + '\u00b0F');
+          }
+        }
+        if (devs.length > 0) {
+          var div = document.createElement('div');
+          div.innerHTML = '<div class="metric-row"><span class="metric-label">S2 deviation</span>' +
+            '<span class="metric-value" style="font-size:0.85em">' + devs.join(' \u00b7 ') + '</span></div>' +
+            '<div class="metric-row"><span class="metric-label" style="opacity:0.6;font-size:0.8em">' +
+            'Finnish S2: ' + s2.targetF.toFixed(1) + '\u00b0F (' + s2.targetC.toFixed(1) + '\u00b0C) \u00b7 ' +
+            'Out 24h: ' + s2.outdoorAvgF.toFixed(1) + '\u00b0F \u00b7 ' + s2.readings + ' pts</span></div>';
+          panel.appendChild(div);
         }
       }
-      if (n > 0) {
-        var avgOutF = sum / n;
-        var avgOutC = (avgOutF - 32) * 5 / 9;
-        var s2C = 21.5 + 0.2 * Math.max(0, Math.min(avgOutC, 20));
-        var s2F = s2C * 9 / 5 + 32;
-        window._s2 = {
-          targetF: Math.round(s2F * 10) / 10,
-          targetC: Math.round(s2C * 10) / 10,
-          lowF: Math.round(((s2C - 1) * 9 / 5 + 32) * 10) / 10,
-          highF: Math.round(((s2C + 1.5) * 9 / 5 + 32) * 10) / 10,
-          outdoorAvgF: Math.round(avgOutF * 10) / 10,
-          outdoorAvgC: Math.round(avgOutC * 10) / 10,
-          readings: n
-        };
-        console.log('[S2] Outdoor 24h avg: ' + avgOutF.toFixed(1) + '°F (' + avgOutC.toFixed(1) + '°C) → S2 target: ' + s2F.toFixed(1) + '°F (' + s2C.toFixed(1) + '°C) from ' + n + ' readings');
-      }
-    }
-  } catch (e) {
-    console.warn('[S2] Weather history fetch failed:', e);
-  }
-};
-
-// Wrap renderChart() to add S2 reference line
-var _origRenderChart = renderChart;
-renderChart = function(zones, hours, diagnostics) { try {
-  _origRenderChart(zones, hours, diagnostics);
-  if (!window._s2) return;
-
-  var container = document.getElementById('tsChart');
-  if (!container) return;
-  var svg = container.querySelector('svg');
-  if (!svg) return;
-
-  var s2 = window._s2;
-
-  // Reconstruct scale functions from the SVG (same logic as renderChart)
-  var cutoff = new Date(Date.now() - hours * 3600000);
-  var series = zones.map(function(z) {
-    return z.timeSeries.filter(function(p) { return p.ts >= cutoff; });
-  }).filter(function(d) { return d.length > 0; });
-
-  if (series.length === 0) return;
-
-  var allT = [];
-  var allTs = [];
-  for (var i = 0; i < series.length; i++) {
-    for (var j = 0; j < series[i].length; j++) {
-      allT.push(series[i][j].temp);
-      allTs.push(series[i][j].ts.getTime());
+    } catch (e) {
+      console.warn('[S2] overlay error:', e);
     }
   }
 
-  var tMin = Math.floor(Math.min.apply(null, allT) - 1);
-  var tMax = Math.ceil(Math.max.apply(null, allT) + 1);
-  var W = 1000, P_l = 50, P_t = 20, P_r = 12, P_b = 30;
-  var pW = W - P_l - P_r, pH = 200 - P_t - P_b;
+  // Poll: compute S2 then overlay after each render cycle
+  // Uses setInterval instead of wrapping refresh — no recursion risk
+  computeS2();
+  setInterval(computeS2, 300000); // re-compute every 5 min with refresh
 
-  function sy(t) { return P_t + pH - ((t - tMin) / (tMax - tMin || 1)) * pH; }
+  // Watch for chart redraws via MutationObserver on tsChart
+  var obs = new MutationObserver(function() { setTimeout(overlayS2, 50); });
+  var target = document.getElementById('tsChart');
+  if (target) obs.observe(target, { childList: true, subtree: true });
 
-  // Only draw if S2 target is within visible range
-  if (s2.targetF < tMin - 2 || s2.targetF > tMax + 2) return;
-
-  // S2 allowed band
-  var bandLow = s2.lowF;
-  var bandHigh = s2.highF;
-  var bandRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-  bandRect.setAttribute('x', P_l);
-  bandRect.setAttribute('y', sy(Math.min(bandHigh, tMax)));
-  bandRect.setAttribute('width', pW);
-  bandRect.setAttribute('height', Math.max(0, sy(Math.max(bandLow, tMin)) - sy(Math.min(bandHigh, tMax))));
-  bandRect.setAttribute('fill', '#2196F3');
-  bandRect.setAttribute('opacity', '0.06');
-  var firstPolyline = svg.querySelector('polyline');
-  if (firstPolyline) {
-    svg.insertBefore(bandRect, firstPolyline);
-  } else {
-    svg.appendChild(bandRect);
-  }
-
-  // S2 target line
-  var line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-  line.setAttribute('x1', P_l);
-  line.setAttribute('y1', sy(s2.targetF));
-  line.setAttribute('x2', W - P_r);
-  line.setAttribute('y2', sy(s2.targetF));
-  line.setAttribute('stroke', '#2196F3');
-  line.setAttribute('stroke-width', '1.5');
-  line.setAttribute('stroke-dasharray', '8,3');
-  line.setAttribute('opacity', '0.7');
-  if (firstPolyline) {
-    svg.insertBefore(line, firstPolyline);
-  } else {
-    svg.appendChild(line);
-  }
-
-  // S2 label
-  var label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-  label.setAttribute('x', W - P_r - 4);
-  label.setAttribute('y', sy(s2.targetF) - 4);
-  label.setAttribute('text-anchor', 'end');
-  label.setAttribute('fill', '#2196F3');
-  label.setAttribute('font-size', '9');
-  label.setAttribute('opacity', '0.8');
-  label.textContent = 'S2 ' + s2.targetF.toFixed(1) + '°F';
-  svg.appendChild(label);
-
-  // Add S2 info to legend
-  var legendEl = document.getElementById('tsLegend');
-  if (legendEl) {
-    legendEl.innerHTML += '<div class="legend-item" style="opacity:0.8">' +
-      '<span class="legend-swatch" style="background:#2196F3"></span>' +
-      'S2 target (' + s2.targetF.toFixed(1) + '°F) · Out avg: ' + s2.outdoorAvgF.toFixed(1) + '°F</div>';
-  }
-} catch(e) { console.warn("[S2] renderChart overlay error:", e); } };
-
-// Wrap renderAnalysis to add S2 deviation metric
-var _origRenderAnalysis = renderAnalysis;
-renderAnalysis = function(zones, weather, spread, anomalies, diagnostics) { try {
-  _origRenderAnalysis(zones, weather, spread, anomalies, diagnostics);
-  if (!window._s2) return;
-  var panel = document.getElementById('analysisPanel');
-  if (!panel) return;
-  var s2 = window._s2;
-
-  var deviations = [];
-  for (var i = 0; i < zones.length; i++) {
-    if (zones[i].avgTemp != null) {
-      var dev = zones[i].avgTemp - s2.targetF;
-      deviations.push(zones[i].name + ': ' + (dev >= 0 ? '+' : '') + dev.toFixed(1) + '°F');
-    }
-  }
-
-  if (deviations.length > 0) {
-    var div = document.createElement('div');
-    div.className = 'metric-row';
-    div.innerHTML = '<div class="metric-row"><span class="metric-label">S2 deviation</span>' +
-      '<span class="metric-value" style="font-size:0.85em">' + deviations.join(' · ') + '</span></div>' +
-      '<div class="metric-row"><span class="metric-label" style="opacity:0.6;font-size:0.8em">' +
-      'Finnish S2 target: ' + s2.targetF.toFixed(1) + '°F (' + s2.targetC.toFixed(1) + '°C) · ' +
-      'Outdoor 24h avg: ' + s2.outdoorAvgF.toFixed(1) + '°F · ' + s2.readings + ' readings</span></div>';
-    panel.appendChild(div);
-  }
-} catch(e) { console.warn("[S2] renderAnalysis error:", e); } };
+  // Also run once now in case chart is already rendered
+  setTimeout(overlayS2, 2000);
+})();

@@ -1,22 +1,17 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="vellum">
+<html lang="en" data-theme="obsidian">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <title>HVAC Thermal Monitor</title>
-  <meta name="description" content="Real-time HVAC zone temperature monitoring dashboard">
-
-  <!-- Stylesheets (order matters: reset → tokens → layout → components) -->
-  <link rel="stylesheet" href="css/reset.css">
-  <link rel="stylesheet" href="css/tokens.css">
-  <link rel="stylesheet" href="css/layout.css">
-  <link rel="stylesheet" href="css/components.css">
+  <link rel="stylesheet" href="css/reset.css?v=10">
+  <link rel="stylesheet" href="css/tokens.css?v=10">
+  <link rel="stylesheet" href="css/layout.css?v=10">
+  <link rel="stylesheet" href="css/components.css?v=10">
+  <script>try{const t=localStorage.getItem('hvac-theme');if(t)document.documentElement.setAttribute('data-theme',t);}catch{}</script>
 </head>
 <body>
-
   <div class="dashboard">
-
-    <!-- Top bar -->
     <div class="top-bar">
       <div>
         <h1>HVAC Monitor</h1>
@@ -24,23 +19,15 @@
       </div>
       <div class="theme-switcher" id="themeSwitcher"></div>
     </div>
-
-    <!-- Anomaly banner (hidden when no alerts) -->
     <div class="anomaly-banner" id="anomalyBanner" style="display:none;"></div>
-
-    <!-- Main grid: floor plan + zone cards -->
-    <div class="main-grid">
-      <div class="card">
-        <div class="card-label">Floor Plan</div>
-        <div id="floorPlan"></div>
-      </div>
-      <div class="card" style="overflow-y:auto;max-height:460px;">
-        <div class="card-label">Zones</div>
-        <div id="zonesContainer"></div>
-      </div>
+    <div class="card">
+      <div class="card-label">Floor Plan</div>
+      <div id="floorPlan"></div>
     </div>
-
-    <!-- Timeseries chart -->
+    <div class="card">
+      <div class="card-label">Zones</div>
+      <div id="zonesContainer"></div>
+    </div>
     <div class="card" style="position:relative;">
       <div class="chart-header">
         <div class="card-label" style="margin:0;">Temperature History</div>
@@ -52,28 +39,17 @@
       </div>
       <div class="ts-chart" id="tsChart"></div>
       <div class="ts-legend" id="tsLegend"></div>
-      <div class="chart-tooltip" id="tooltip"></div>
     </div>
-
-    <!-- Thermal analysis -->
     <div class="card">
       <div class="card-label">Thermal Analysis</div>
       <div class="analysis-grid" id="analysisGrid"></div>
       <div class="card-label" style="margin-top:16px;">ΔT Room Differentials</div>
       <div class="delta-grid" id="deltaGrid"></div>
     </div>
-
-    <!-- Status bar -->
     <div class="status-bar" id="statusBar">
-      <span><span class="status-dot offline"></span>Initializing...</span>
+      <span><span class="status-dot offline"></span>Loading...</span>
     </div>
-
   </div>
-
-  <!-- Composition root — ES modules, no bundler needed -->
-  <script src="js/debug.js"></script>
-  <script type="module" src="js/bundle.js"></script>
-
-<script>window.onerror=(m,s,l)=>{document.getElementById("statusBar").innerHTML="<span style=color:red>"+m+" at "+s+":"+l+"</span>"};window.addEventListener("unhandledrejection",e=>{document.getElementById("statusBar").innerHTML="<span style=color:red>"+e.reason+"</span>"});</script>
+  <script src="js/bundle.js?v=10"></script>
 </body>
 </html>

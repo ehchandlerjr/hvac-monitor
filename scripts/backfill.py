@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""One-time backfill via /v1/history/devices with rate limiting"""
-import os, sys, time
+"""One-time backfill via /v1/history/devices — with rate limiting + date cutoff"""
+import os, sys, re, time
 from datetime import datetime, timezone, timedelta
 from urllib.parse import urlparse, parse_qs
 import httpx
@@ -11,6 +11,7 @@ ST_TOKEN = os.environ["SMARTTHINGS_TOKEN"]
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_KEY = os.environ["SUPABASE_KEY"]
 BACKFILL_DAYS = 7
+MAX_PAGES = 100
 
 def get_location_id():
     with httpx.Client(timeout=30) as client:
@@ -26,16 +27,14 @@ def get_smartthings_devices():
         resp.raise_for_status()
         return resp.json().get("items", [])
 
-def st_get(client, url, headers, params, max_retries=3):
+def st_get(client, url, headers, params):
     """GET with rate-limit retry."""
-    for attempt in range(max_retries):
+    for _ in range(3):
         resp = client.get(url, headers=headers, params=params)
         if resp.status_code == 429:
-            # Parse retry delay from response
             try:
-                details = resp.json().get("error",{}).get("details",[{}])[0].get("message","")
-                import re
-                match = re.search(r'retry in (\d+) millis', details)
+                msg = resp.json().get("error",{}).get("details",[{}])[0].get("message","")
+                match = re.search(r'retry in (\d+) millis', msg)
                 wait = int(match.group(1)) / 1000 + 1 if match else 60
             except:
                 wait = 60
@@ -43,26 +42,39 @@ def st_get(client, url, headers, params, max_retries=3):
             time.sleep(wait)
             continue
         return resp
-    return resp  # return last response even if still 429
+    return resp
 
-def get_device_history(device_id, location_id):
+def get_device_history(device_id, location_id, cutoff):
+    """Pull history, stopping when events are older than cutoff."""
     headers = {"Authorization": f"Bearer {ST_TOKEN}"}
     all_items = []
+    hit_cutoff = False
     with httpx.Client(timeout=60) as client:
         params = {"deviceId": device_id, "locationId": location_id, "limit": 200}
-        page = 0
-        while True:
+        for page in range(1, MAX_PAGES + 1):
             resp = st_get(client, f"{ST_API}/history/devices", headers, params)
             if resp.status_code != 200:
-                print(f"    HTTP {resp.status_code}: {resp.text[:200]}")
+                print(f"    HTTP {resp.status_code} on page {page}")
                 break
             data = resp.json()
             items = data.get("items", [])
-            all_items.extend(items)
-            page += 1
+            if not items:
+                break
+            # Check if oldest item in this page is before cutoff
+            for item in items:
+                ts_str = item.get("time", "")
+                if ts_str:
+                    try:
+                        ts = datetime.fromisoformat(ts_str)
+                        if ts < cutoff:
+                            hit_cutoff = True
+                    except:
+                        pass
+                all_items.append(item)
             if page % 10 == 0:
-                print(f"    Page {page}: {len(all_items)} events so far...")
-            if len(items) == 0:
+                print(f"    Page {page}: {len(all_items)} events...")
+            if hit_cutoff:
+                print(f"    Reached cutoff at page {page}")
                 break
             nl = data.get("_links", {}).get("next", {}).get("href")
             if nl:
@@ -74,12 +86,11 @@ def get_device_history(device_id, location_id):
                         params[k] = v
             else:
                 break
-            # Small delay to stay under rate limit
             time.sleep(1.5)
-    print(f"    Total: {page} pages, {len(all_items)} events")
+    print(f"    Total: {len(all_items)} events")
     return all_items
 
-def history_to_readings(items):
+def history_to_readings(items, cutoff):
     buckets = {}
     for item in items:
         attr = item.get("attribute", "")
@@ -91,6 +102,8 @@ def history_to_readings(items):
         try:
             ts = datetime.fromisoformat(ts_str)
         except:
+            continue
+        if ts < cutoff:
             continue
         bk = ts.replace(second=0, microsecond=0).isoformat()
         if bk not in buckets:
@@ -110,7 +123,9 @@ def history_to_readings(items):
     return [b for b in buckets.values() if "temp_f" in b]
 
 def main():
-    print(f"=== BACKFILL: {BACKFILL_DAYS} days ===")
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(days=BACKFILL_DAYS)
+    print(f"=== BACKFILL: {BACKFILL_DAYS} days (cutoff: {cutoff.isoformat()}) ===")
     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
     location_id = get_location_id()
     devices = get_smartthings_devices()
@@ -121,13 +136,11 @@ def main():
                for cap in comp.get("capabilities", []))
     ]
     print(f"  Found {len(temp_sensors)} sensor(s)\n")
-
     no_weather = {k: None for k in [
         "outdoor_temp_f", "outdoor_humidity_pct", "wind_speed_mph",
         "wind_gust_mph", "wind_direction_deg", "wind_chill_f",
         "cloud_cover_pct", "dewpoint_f", "pressure_inhg", "precip_last_hour_in"
     ]}
-
     total = 0
     for device in temp_sensors:
         device_id = device["deviceId"]
@@ -135,8 +148,8 @@ def main():
         sensor_id = device_label.lower().replace(" ", "_").replace("-", "_")
         print(f"  {sensor_id}")
         try:
-            items = get_device_history(device_id, location_id)
-            readings = history_to_readings(items)
+            items = get_device_history(device_id, location_id, cutoff)
+            readings = history_to_readings(items, cutoff)
             print(f"    {len(items)} events -> {len(readings)} readings")
             rows = [{
                 "timestamp": r["timestamp"], "sensor_id": sensor_id,
@@ -151,12 +164,10 @@ def main():
                     total += len(batch)
                 except Exception as e:
                     print(f"    Upsert error: {e}", file=sys.stderr)
-            print(f"    Upserted {len(rows)} rows")
+            print(f"    Upserted {len(rows)} rows\n")
         except Exception as e:
             print(f"    Error: {e}", file=sys.stderr)
             import traceback; traceback.print_exc()
-        print()
-
     print(f"=== DONE: {total} total rows upserted ===")
 
 if __name__ == "__main__":

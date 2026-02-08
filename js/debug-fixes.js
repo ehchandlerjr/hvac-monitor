@@ -344,16 +344,43 @@ window._exportSidsLog = function() {
   a.click();
 };
 
-// === S2 DYNAMIC SETPOINT v2 — Finnish Sisäilmastoluokitus 2018 ===
-// No function wrapping — uses MutationObserver + post-render injection
-// to avoid infinite recursion from double-load or script caching.
-
+// === ADVANCED DIAGNOSTICS: S2 + ACH + Mold Index ===
+// Single IIFE, no function wrapping, clean renders
 (function() {
-  if (window._s2Init) return; // guard against double-load
-  window._s2Init = true;
-  window._s2 = null;
+  if (window._extrasInit) return;
+  window._extrasInit = true;
 
-  // Compute S2 from weather history (called once per refresh cycle)
+  window._s2 = null;
+  window._achResults = null;
+  window._moldIndex = {};
+
+  // ── UTILITIES ──
+
+  function absHumidity(tempF, rhPct) {
+    if (tempF == null || rhPct == null) return null;
+    var tc = (tempF - 32) * 5 / 9;
+    var es = 6.112 * Math.exp((17.67 * tc) / (tc + 243.5));
+    return (es * (rhPct / 100) * 216.7) / (tc + 273.15);
+  }
+
+  function rhCrit(tc) {
+    if (tc < 0) return 100;
+    if (tc > 50) tc = 50;
+    return Math.max(0, Math.min(100,
+      -0.00267 * tc * tc * tc + 0.160 * tc * tc - 3.13 * tc + 100));
+  }
+
+  function k1Growth(tc, rh) {
+    if (tc < 0 || tc > 50) return 0;
+    var rc = rhCrit(tc);
+    if (rh <= rc) return 0;
+    var rhExcess = (rh - rc) / (100 - rc + 0.01);
+    var tFactor = tc < 5 ? tc / 5 : (tc < 35 ? 1 : Math.max(0, (50 - tc) / 15));
+    return 0.14 * rhExcess * tFactor;
+  }
+
+  // ── S2 COMPUTE ──
+
   async function computeS2() {
     try {
       var wh = await fetchWeatherHistory();
@@ -373,40 +400,32 @@ window._exportSidsLog = function() {
         lowF: Math.round(((s2C - 1) * 9 / 5 + 32) * 10) / 10,
         highF: Math.round(((s2C + 1.5) * 9 / 5 + 32) * 10) / 10,
         outdoorAvgF: Math.round(avgOutF * 10) / 10,
-        outdoorAvgC: Math.round(avgOutC * 10) / 10,
         readings: n
       };
-      console.log('[S2] Outdoor 24h avg: ' + avgOutF.toFixed(1) + '°F → target: ' + s2F.toFixed(1) + '°F from ' + n + ' pts');
-    } catch (e) {
-      console.warn('[S2] compute error:', e);
-    }
+    } catch (e) { console.warn('[S2] compute error:', e); }
   }
 
-  // Overlay S2 line onto existing chart SVG
+  // ── S2 CHART OVERLAY ──
+
   function overlayS2() {
     try {
       if (!window._s2 || !lastData) return;
       var container = document.getElementById('tsChart');
       if (!container) return;
       var svg = container.querySelector('svg');
-      if (!svg || svg.getAttribute('data-s2')) return; // already overlaid
+      if (!svg || svg.getAttribute('data-s2')) return;
       svg.setAttribute('data-s2', '1');
 
       var s2 = window._s2;
       var zones = lastData.zones;
       var hours = parseInt((document.querySelector('#chartTabs .chart-tab.active') || {}).dataset.range || '24', 10);
       var cutoff = new Date(Date.now() - hours * 3600000);
-
-      var allT = [], allTs = [];
+      var allT = [];
       for (var i = 0; i < zones.length; i++) {
         var pts = zones[i].timeSeries.filter(function(p) { return p.ts >= cutoff; });
-        for (var j = 0; j < pts.length; j++) {
-          allT.push(pts[j].temp);
-          allTs.push(pts[j].ts.getTime());
-        }
+        for (var j = 0; j < pts.length; j++) allT.push(pts[j].temp);
       }
       if (allT.length === 0) return;
-
       var tMin = Math.floor(Math.min.apply(null, allT) - 1);
       var tMax = Math.ceil(Math.max.apply(null, allT) + 1);
       if (s2.targetF < tMin - 2 || s2.targetF > tMax + 2) return;
@@ -414,289 +433,254 @@ window._exportSidsLog = function() {
       var W = 1000, P_l = 50, P_t = 20, P_r = 12, pH = 150;
       var pW = W - P_l - P_r;
       function sy(t) { return P_t + pH - ((t - tMin) / (tMax - tMin || 1)) * pH; }
-
       var ns = 'http://www.w3.org/2000/svg';
-      var firstPoly = svg.querySelector('polyline');
+      var fp = svg.querySelector('polyline');
 
-      // Band
       var rect = document.createElementNS(ns, 'rect');
-      rect.setAttribute('x', P_l);
+      rect.setAttribute('x', P_l); rect.setAttribute('width', pW);
       rect.setAttribute('y', sy(Math.min(s2.highF, tMax)));
-      rect.setAttribute('width', pW);
       rect.setAttribute('height', Math.max(0, sy(Math.max(s2.lowF, tMin)) - sy(Math.min(s2.highF, tMax))));
-      rect.setAttribute('fill', '#2196F3');
-      rect.setAttribute('opacity', '0.06');
-      if (firstPoly) svg.insertBefore(rect, firstPoly); else svg.appendChild(rect);
+      rect.setAttribute('fill', '#2196F3'); rect.setAttribute('opacity', '0.06');
+      if (fp) svg.insertBefore(rect, fp); else svg.appendChild(rect);
 
-      // Line
       var line = document.createElementNS(ns, 'line');
-      line.setAttribute('x1', P_l);
-      line.setAttribute('y1', sy(s2.targetF));
-      line.setAttribute('x2', W - P_r);
-      line.setAttribute('y2', sy(s2.targetF));
-      line.setAttribute('stroke', '#2196F3');
-      line.setAttribute('stroke-width', '1.5');
-      line.setAttribute('stroke-dasharray', '8,3');
-      line.setAttribute('opacity', '0.7');
-      if (firstPoly) svg.insertBefore(line, firstPoly); else svg.appendChild(line);
+      line.setAttribute('x1', P_l); line.setAttribute('y1', sy(s2.targetF));
+      line.setAttribute('x2', W - P_r); line.setAttribute('y2', sy(s2.targetF));
+      line.setAttribute('stroke', '#2196F3'); line.setAttribute('stroke-width', '1.5');
+      line.setAttribute('stroke-dasharray', '8,3'); line.setAttribute('opacity', '0.7');
+      if (fp) svg.insertBefore(line, fp); else svg.appendChild(line);
 
-      // Label
       var lbl = document.createElementNS(ns, 'text');
-      lbl.setAttribute('x', W - P_r - 4);
-      lbl.setAttribute('y', sy(s2.targetF) - 4);
-      lbl.setAttribute('text-anchor', 'end');
-      lbl.setAttribute('fill', '#2196F3');
-      lbl.setAttribute('font-size', '9');
-      lbl.setAttribute('opacity', '0.8');
+      lbl.setAttribute('x', W - P_r - 4); lbl.setAttribute('y', sy(s2.targetF) - 4);
+      lbl.setAttribute('text-anchor', 'end'); lbl.setAttribute('fill', '#2196F3');
+      lbl.setAttribute('font-size', '9'); lbl.setAttribute('opacity', '0.8');
       lbl.textContent = 'S2 ' + s2.targetF.toFixed(1) + '\u00b0F';
       svg.appendChild(lbl);
 
-      // Legend
       var leg = document.getElementById('tsLegend');
       if (leg && leg.innerHTML.indexOf('S2') === -1) {
         leg.innerHTML += '<div class="legend-item" style="opacity:0.8">' +
           '<span class="legend-swatch" style="background:#2196F3"></span>' +
-          'S2 target (' + s2.targetF.toFixed(1) + '\u00b0F) \u00b7 Out avg: ' + s2.outdoorAvgF.toFixed(1) + '\u00b0F</div>';
+          'S2 target (' + s2.targetF.toFixed(1) + '\u00b0F) \u2014 expected indoor temp given outdoor conditions</div>';
       }
+    } catch (e) { console.warn('[S2] overlay error:', e); }
+  }
 
-      // Analysis panel deviation
-      var panel = document.getElementById('analysisGrid');
-      if (panel && panel.innerHTML.indexOf('S2 deviation') === -1) {
-        var devs = [];
-        for (var k = 0; k < zones.length; k++) {
-          if (zones[k].avgTemp != null) {
-            var dev = zones[k].avgTemp - s2.targetF;
-            devs.push(zones[k].name + ': ' + (dev >= 0 ? '+' : '') + dev.toFixed(1) + '\u00b0F');
+  // ── ACH COMPUTE ──
+
+  function computeACH() {
+    try {
+      if (!lastData) return;
+      var outdoorAH = null;
+      if (lastData.weather && lastData.weather.tempF != null && lastData.weather.humidity != null) {
+        outdoorAH = absHumidity(lastData.weather.tempF, lastData.weather.humidity);
+      }
+      if (outdoorAH == null) return;
+
+      var results = [];
+      for (var zi = 0; zi < lastData.zones.length; zi++) {
+        var zone = lastData.zones[zi];
+        var ts = zone.timeSeries;
+        if (!ts || ts.length < 12) continue;
+
+        var nightPts = [];
+        for (var i = 0; i < ts.length; i++) {
+          var h = ts[i].ts.getHours();
+          if ((h >= 22 || h <= 8) && ts[i].hum != null) {
+            var ah = absHumidity(ts[i].temp, ts[i].hum);
+            if (ah != null && ah > outdoorAH) nightPts.push({ ts: ts[i].ts.getTime(), ah: ah });
           }
         }
-        if (devs.length > 0) {
-          var div = document.createElement('div');
-          div.innerHTML = '<div class="metric-row"><span class="metric-label">S2 deviation</span>' +
-            '<span class="metric-value" style="font-size:0.85em">' + devs.join(' \u00b7 ') + '</span></div>' +
-            '<div class="metric-row"><span class="metric-label" style="opacity:0.6;font-size:0.8em">' +
-            'Finnish S2: ' + s2.targetF.toFixed(1) + '\u00b0F (' + s2.targetC.toFixed(1) + '\u00b0C) \u00b7 ' +
-            'Out 24h: ' + s2.outdoorAvgF.toFixed(1) + '\u00b0F \u00b7 ' + s2.readings + ' pts</span></div>';
-          panel.appendChild(div);
+        if (nightPts.length < 6) continue;
+
+        var decays = [], cur = [nightPts[0]];
+        for (var j = 1; j < nightPts.length; j++) {
+          if (nightPts[j].ah < cur[cur.length - 1].ah) { cur.push(nightPts[j]); }
+          else { if (cur.length >= 4) decays.push(cur.slice()); cur = [nightPts[j]]; }
         }
+        if (cur.length >= 4) decays.push(cur.slice());
+        if (decays.length === 0) continue;
+
+        var best = null;
+        for (var d = 0; d < decays.length; d++) {
+          var seg = decays[d], xs = [], ys = [], t0 = seg[0].ts;
+          for (var k = 0; k < seg.length; k++) {
+            var diff = seg[k].ah - outdoorAH;
+            if (diff <= 0.1) continue;
+            xs.push((seg[k].ts - t0) / 3600000);
+            ys.push(Math.log(diff));
+          }
+          if (xs.length < 4) continue;
+          var n = xs.length, sx = 0, sy2 = 0, sxy = 0, sx2 = 0;
+          for (var m = 0; m < n; m++) { sx += xs[m]; sy2 += ys[m]; sxy += xs[m]*ys[m]; sx2 += xs[m]*xs[m]; }
+          var denom = n*sx2 - sx*sx;
+          if (Math.abs(denom) < 1e-10) continue;
+          var slope = (n*sxy - sx*sy2) / denom;
+          var ach = -slope;
+          if (ach >= 0.1 && ach <= 5.0) {
+            if (!best || ach < best.ach) best = { ach: ach, points: n };
+          }
+        }
+        if (best) results.push({ zone: zone.name, ach: Math.round(best.ach*100)/100, belowCode: best.ach < 0.5 });
       }
-    } catch (e) {
-      console.warn('[S2] overlay error:', e);
-    }
+      window._achResults = results.length > 0 ? results : null;
+    } catch (e) { console.warn('[ACH] compute error:', e); }
   }
 
-  // Poll: compute S2 then overlay after each render cycle
-  // Uses setInterval instead of wrapping refresh — no recursion risk
-  computeS2();
-  setInterval(computeS2, 300000); // re-compute every 5 min with refresh
-
-  // Watch for chart redraws via MutationObserver on tsChart
-  var obs = new MutationObserver(function() { setTimeout(overlayS2, 50); });
-  var target = document.getElementById('tsChart');
-  if (target) obs.observe(target, { childList: true, subtree: true });
-
-  // Also run once now in case chart is already rendered
-  setTimeout(overlayS2, 2000);
-})();
-
-// === MOLD INDEX GAUGE — Finnish VTT Viitanen-Ojanen Model ===
-// Source: VTT Technical Research Centre of Finland
-// Tracks mold growth potential via ODE integration: dM/dt = f(T, RH, material)
-// M scale: 0 (clean) → 1 (microscopic spores) → 3 (visible) → 6 (full coverage)
-// Material class: "sensitive" (wood framing) — appropriate for US townhouse
-//
-// Key advantage over simple "RH > 70% = bad": tracks cumulative exposure
-// AND models decline when conditions improve (dry/cold).
-//
-// EVIDENCE: If M > 1 in any zone, that's microscopic germination —
-// invisible but biologically active. Powerful habitability argument.
-
-(function() {
-  if (window._moldInit) return;
-  window._moldInit = true;
-  window._moldIndex = {}; // per zone: { M, trend[], peakM }
-
-  // Viitanen-Ojanen critical RH threshold (below this, no growth)
-  // RH_crit = -0.00267·T³ + 0.160·T² - 3.13·T + 100  (for T in °C)
-  function rhCrit(tc) {
-    if (tc < 0) return 100;
-    if (tc > 50) tc = 50;
-    return Math.max(0, Math.min(100,
-      -0.00267 * tc * tc * tc + 0.160 * tc * tc - 3.13 * tc + 100
-    ));
-  }
-
-  // Growth rate coefficient k1 for sensitive material (pine/wood)
-  // k1 depends on T and RH; simplified from VTT lookup tables
-  function k1(tc, rh) {
-    if (tc < 0 || tc > 50) return 0;
-    var rc = rhCrit(tc);
-    if (rh <= rc) return 0;
-    // Sensitive material: k1 ~ 1 at optimal conditions (T~25, RH~97)
-    // Scale by distance from critical
-    var rhExcess = (rh - rc) / (100 - rc + 0.01);
-    var tFactor = tc < 5 ? tc / 5 : (tc < 35 ? 1 : Math.max(0, (50 - tc) / 15));
-    return 0.14 * rhExcess * tFactor; // tuned for sensitive wood
-  }
-
-  // Decline rate when conditions are unfavorable
-  // VTT model: M decreases when RH < RH_crit or T < 0
-  function declineRate(M, tc, rh) {
-    var rc = rhCrit(tc);
-    if (rh >= rc && tc >= 0) return 0; // favorable — no decline
-    // Decline: -0.032/day for sensitive materials when dry
-    // Faster decline at lower RH and lower T
-    var dryness = Math.max(0, (rc - rh) / rc);
-    return -0.032 * (1 + dryness); // per day, negative
-  }
+  // ── MOLD COMPUTE ──
 
   function computeMold() {
     try {
       if (!lastData) return;
-
       for (var zi = 0; zi < lastData.zones.length; zi++) {
         var zone = lastData.zones[zi];
         var ts = zone.timeSeries;
         if (!ts || ts.length < 6) continue;
-
-        // Initialize if needed
-        if (!window._moldIndex[zone.id]) {
-          window._moldIndex[zone.id] = { M: 0, trend: [], peakM: 0, lastTs: 0 };
-        }
+        if (!window._moldIndex[zone.id]) window._moldIndex[zone.id] = { M: 0, peakM: 0, lastTs: 0 };
         var state = window._moldIndex[zone.id];
 
-        // Process time series points we haven't seen yet
         for (var i = 0; i < ts.length; i++) {
           var tMs = ts[i].ts.getTime();
           if (tMs <= state.lastTs) continue;
           if (ts[i].hum == null) continue;
-
           var tc = (ts[i].temp - 32) * 5 / 9;
           var rh = ts[i].hum;
-
-          // Time step in days (5-min intervals = 5/1440 days)
-          var dt = state.lastTs > 0 ? (tMs - state.lastTs) / 86400000 : 5 / 1440;
-          if (dt > 1) dt = 5 / 1440; // cap if gap in data
+          var dt = state.lastTs > 0 ? (tMs - state.lastTs) / 86400000 : 5/1440;
+          if (dt > 1) dt = 5/1440;
           if (dt <= 0) continue;
-
-          // Growth or decline
-          var growth = k1(tc, rh);
-          var decline = declineRate(state.M, tc, rh);
+          var growth = k1Growth(tc, rh);
+          var decline = (rh < rhCrit(tc) || tc < 0) ? -0.032 * (1 + Math.max(0, (rhCrit(tc) - rh) / rhCrit(tc))) : 0;
           var dM = (growth > 0 ? growth : decline) * dt;
-
           state.M = Math.max(0, Math.min(6, state.M + dM));
           state.peakM = Math.max(state.peakM, state.M);
           state.lastTs = tMs;
         }
-
-        // Record trend point (one per compute cycle)
-        state.trend.push({ ts: Date.now(), M: state.M });
-        if (state.trend.length > 288) state.trend.shift(); // keep ~24h at 5-min
       }
-
-      renderMold();
-      console.log('[MOLD] Index updated:', Object.keys(window._moldIndex).map(function(k) {
-        return k + ': M=' + window._moldIndex[k].M.toFixed(3);
-      }).join(', '));
-    } catch (e) {
-      console.warn('[MOLD] compute error:', e);
-    }
+    } catch (e) { console.warn('[MOLD] compute error:', e); }
   }
 
-  function renderMold() {
+  // ── UNIFIED RENDER ──
+  // Numbers first, big and clear. Education behind a toggle.
+
+  function renderExtrasPanel() {
     try {
       if (!lastData) return;
-
-      // Find or create mold panel
-      var panel = document.getElementById('moldPanel');
+      var panel = document.getElementById('extrasPanel');
       if (!panel) {
-        // Create panel after analysis panel
-        var ap = document.getElementById('analysisGrid');
-        if (!ap) return;
+        var ref = document.getElementById('analysisGrid');
+        if (!ref) return;
         panel = document.createElement('div');
-        panel.id = 'moldPanel';
-        panel.className = 'card';
-        ap.parentNode.insertBefore(panel, ap.nextSibling);
+        panel.id = 'extrasPanel';
+        // Insert as a new card after the thermal analysis card
+        var card = ref.closest('.card') || ref.parentNode;
+        card.parentNode.insertBefore(panel, card.nextSibling);
       }
 
+      var html = '';
       var zones = lastData.zones;
-      var html = '<h2 class="card-title">MOLD RISK INDEX</h2>' +
-        '<div style="opacity:0.7;font-size:0.8em;margin-bottom:12px">' +
-        'Viitanen-Ojanen model (VTT Finland) · Wood-frame "sensitive" class · Scale: 0–6</div>';
 
-      for (var zi = 0; zi < zones.length; zi++) {
-        var zone = zones[zi];
-        var state = window._moldIndex[zone.id];
-        if (!state) continue;
-
-        var M = state.M;
-        var pct = Math.min(100, (M / 6) * 100);
-
-        // Color: 0-1 green, 1-3 yellow, 3-6 red
-        var color, label;
-        if (M < 0.5) { color = 'var(--ok)'; label = 'Safe'; }
-        else if (M < 1) { color = 'var(--ok)'; label = 'Low risk'; }
-        else if (M < 2) { color = 'var(--wn)'; label = 'Microscopic spores possible'; }
-        else if (M < 3) { color = 'var(--wn)'; label = 'Microscopic growth likely'; }
-        else if (M < 4) { color = 'var(--dg)'; label = 'Visible mold possible'; }
-        else { color = 'var(--dg)'; label = 'Extensive colonization'; }
-
-        html += '<div style="margin-bottom:10px">' +
-          '<div class="metric-row"><span class="metric-label">' + zone.name + '</span>' +
-          '<span class="metric-value" style="color:' + color + '">' +
-          'M = ' + M.toFixed(2) + ' — ' + label + '</span></div>' +
-          // Progress bar
-          '<div style="height:8px;background:var(--sd);border-radius:4px;overflow:hidden;margin:4px 0">' +
-          '<div style="height:100%;width:' + pct + '%;border-radius:4px;' +
-          'background:linear-gradient(90deg, var(--ok) 0%, var(--wn) 50%, var(--dg) 100%)"></div></div>' +
-          // Scale labels
-          '<div style="display:flex;justify-content:space-between;font-size:0.65em;opacity:0.5">' +
-          '<span>0 clean</span><span>1 spores</span><span>3 visible</span><span>6 full</span></div>' +
-          '</div>';
+      // ── S2 DEVIATION TABLE ──
+      if (window._s2) {
+        var s2 = window._s2;
+        html += '<div class="card" style="margin-bottom:12px"><h2 class="card-title">S2 SETPOINT DEVIATION</h2>';
+        html += '<table style="width:100%;border-collapse:collapse;font-size:0.9em">';
+        html += '<tr style="opacity:0.6;font-size:0.8em"><td>Zone</td><td style="text-align:right">Actual</td>' +
+          '<td style="text-align:right">Target</td><td style="text-align:right">Deviation</td></tr>';
+        for (var i = 0; i < zones.length; i++) {
+          if (zones[i].avgTemp == null) continue;
+          var dev = zones[i].avgTemp - s2.targetF;
+          var color = Math.abs(dev) > 3 ? 'var(--dg)' : Math.abs(dev) > 1.5 ? 'var(--wn)' : 'var(--ok)';
+          html += '<tr><td>' + zones[i].name + '</td>' +
+            '<td style="text-align:right">' + zones[i].avgTemp.toFixed(1) + '\u00b0F</td>' +
+            '<td style="text-align:right">' + s2.targetF.toFixed(1) + '\u00b0F</td>' +
+            '<td style="text-align:right;font-weight:600;color:' + color + '">' +
+            (dev >= 0 ? '+' : '') + dev.toFixed(1) + '\u00b0F</td></tr>';
+        }
+        html += '</table>';
+        html += '<details style="margin-top:8px;font-size:0.75em;opacity:0.6"><summary style="cursor:pointer">\u2139\ufe0f What is S2?</summary>' +
+          '<p style="margin:4px 0">The Finnish S2 standard defines the expected indoor temperature based on outdoor conditions. ' +
+          'Target = 21.5\u00b0C + 0.2 \u00d7 outdoor avg (clamped 0\u201320\u00b0C). ' +
+          'Current outdoor 24h avg: ' + s2.outdoorAvgF.toFixed(1) + '\u00b0F from ' + s2.readings + ' readings. ' +
+          'Positive deviation = rooms are hotter than they should be.</p></details>';
+        html += '</div>';
       }
 
-      // Footnote
-      html += '<div style="opacity:0.6;font-size:0.75em;margin-top:8px;border-top:1px solid var(--bd);padding-top:6px">' +
-        'M > 1 = microscopic germination (invisible but biologically active). ' +
-        'M > 3 = visible mold growth. Model tracks cumulative exposure and declines when conditions improve. ' +
-        'Based on indoor T + RH at each 5-min reading. Wood-frame construction = "sensitive" material class.</div>';
+      // ── MOLD INDEX TABLE ──
+      var hasMold = false;
+      for (var k in window._moldIndex) { if (window._moldIndex[k].lastTs > 0) { hasMold = true; break; } }
+
+      if (hasMold) {
+        html += '<div class="card" style="margin-bottom:12px"><h2 class="card-title">MOLD RISK INDEX</h2>';
+        for (var zi2 = 0; zi2 < zones.length; zi2++) {
+          var state = window._moldIndex[zones[zi2].id];
+          if (!state || state.lastTs === 0) continue;
+          var M = state.M;
+          var pct = Math.min(100, (M / 6) * 100);
+          var color2, lbl;
+          if (M < 1) { color2 = 'var(--ok)'; lbl = 'Safe'; }
+          else if (M < 3) { color2 = 'var(--wn)'; lbl = 'Spore risk'; }
+          else { color2 = 'var(--dg)'; lbl = 'Visible mold risk'; }
+
+          html += '<div style="margin-bottom:8px">' +
+            '<div style="display:flex;justify-content:space-between;align-items:baseline">' +
+            '<span>' + zones[zi2].name + '</span>' +
+            '<span style="font-size:1.3em;font-weight:700;color:' + color2 + '">' + M.toFixed(2) + ' <span style="font-size:0.6em;font-weight:400">/ 6</span></span>' +
+            '</div>' +
+            '<div style="height:6px;background:var(--sd);border-radius:3px;overflow:hidden;margin:3px 0">' +
+            '<div style="height:100%;width:' + pct + '%;border-radius:3px;' +
+            'background:linear-gradient(90deg,var(--ok) 0%,var(--wn) 50%,var(--dg) 100%)"></div></div></div>';
+        }
+        html += '<details style="margin-top:6px;font-size:0.75em;opacity:0.6"><summary style="cursor:pointer">\u2139\ufe0f What is this?</summary>' +
+          '<p style="margin:4px 0">Viitanen-Ojanen model (VTT Finland). Tracks cumulative mold growth potential from temperature + humidity. ' +
+          'M &lt; 1 = safe. M 1\u20133 = microscopic spores (invisible but active). M &gt; 3 = visible mold. ' +
+          'Wood-frame "sensitive" class. Declines when conditions improve.</p></details>';
+        html += '</div>';
+      }
+
+      // ── ACH TABLE ──
+      if (window._achResults && window._achResults.length > 0) {
+        html += '<div class="card" style="margin-bottom:12px"><h2 class="card-title">VENTILATION RATE</h2>';
+        for (var a = 0; a < window._achResults.length; a++) {
+          var r = window._achResults[a];
+          var color3 = r.belowCode ? 'var(--dg)' : 'var(--ok)';
+          var status = r.belowCode ? '\u26a0 Below code' : '\u2713 Adequate';
+          html += '<div style="display:flex;justify-content:space-between;margin-bottom:4px">' +
+            '<span>' + r.zone + '</span>' +
+            '<span style="font-weight:600;color:' + color3 + '">' + r.ach.toFixed(2) + ' ACH &nbsp;' + status + '</span></div>';
+        }
+        html += '<details style="margin-top:6px;font-size:0.75em;opacity:0.6"><summary style="cursor:pointer">\u2139\ufe0f What is ACH?</summary>' +
+          '<p style="margin:4px 0">Air Changes per Hour, estimated from overnight humidity decay. ' +
+          'ASHRAE 62.2 requires \u22650.35 ACH (bedrooms) / 0.5 ACH (general). ' +
+          'Below-code ventilation is a habitability concern.</p></details>';
+        html += '</div>';
+      } else {
+        html += '<div class="card" style="margin-bottom:12px;opacity:0.5"><h2 class="card-title">VENTILATION RATE</h2>' +
+          '<div style="font-size:0.85em">Waiting for overnight humidity data\u2026</div></div>';
+      }
 
       panel.innerHTML = html;
-
-      // Also add anomaly if any zone M > 1
-      // (don't duplicate — check if already present)
-      if (lastData.anomalies) {
-        for (var k in window._moldIndex) {
-          if (window._moldIndex[k].M >= 1) {
-            var zName = '';
-            for (var z = 0; z < zones.length; z++) {
-              if (zones[z].id === k) zName = zones[z].name;
-            }
-            var moldMsg = '\u26a0 Mold risk: ' + zName + ' M=' + window._moldIndex[k].M.toFixed(2) +
-              ' — microscopic germination threshold exceeded';
-            var exists = false;
-            for (var a = 0; a < lastData.anomalies.length; a++) {
-              if (lastData.anomalies[a].msg.indexOf('Mold risk') !== -1 &&
-                  lastData.anomalies[a].msg.indexOf(zName) !== -1) {
-                exists = true; break;
-              }
-            }
-            if (!exists) {
-              lastData.anomalies.push({ level: 'warning', msg: moldMsg });
-            }
-          }
-        }
-      }
-    } catch (e) {
-      console.warn('[MOLD] render error:', e);
-    }
+    } catch (e) { console.warn('[EXTRAS] render error:', e); }
   }
 
-  // Run after each refresh
-  computeMold();
-  setInterval(computeMold, 300000);
+  // ── MAIN LOOP ──
 
-  // Watch for data refreshes
-  var obs = new MutationObserver(function() { setTimeout(renderMold, 150); });
-  var ap = document.getElementById('analysisGrid');
-  if (ap) obs.observe(ap, { childList: true });
+  async function runAll() {
+    await computeS2();
+    computeACH();
+    computeMold();
+    renderExtrasPanel();
+    overlayS2();
+  }
+
+  // Initial run with delay (wait for first data fetch)
+  setTimeout(runAll, 3000);
+  setInterval(runAll, 300000);
+
+  // Watch for chart redraws
+  var tsEl = document.getElementById('tsChart');
+  if (tsEl) new MutationObserver(function() { setTimeout(overlayS2, 50); }).observe(tsEl, { childList: true, subtree: true });
+
+  // Watch for analysis panel redraws
+  var agEl = document.getElementById('analysisGrid');
+  if (agEl) new MutationObserver(function() { setTimeout(renderExtrasPanel, 100); }).observe(agEl, { childList: true });
 })();

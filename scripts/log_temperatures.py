@@ -3,8 +3,9 @@
 SmartThings Temperature Logger — Self-Healing Edition
 Pulls event history via /v1/history/devices + upserts to Supabase
 """
-import os, sys
+import os, sys, re, time
 from datetime import datetime, timezone, timedelta
+from urllib.parse import urlparse, parse_qs
 import httpx
 from supabase import create_client
 
@@ -63,54 +64,85 @@ def get_outdoor_weather():
         print(f"  Warning: Could not fetch weather: {e}", file=sys.stderr)
         return {k:None for k in ["outdoor_temp_f","outdoor_humidity_pct","wind_speed_mph","wind_gust_mph","wind_direction_deg","wind_chill_f","cloud_cover_pct","dewpoint_f","pressure_inhg","precip_last_hour_in"]}
 
+def get_location_id():
+    with httpx.Client(timeout=30) as client:
+        resp = client.get(f"{ST_API}/locations", headers={"Authorization": f"Bearer {ST_TOKEN}"})
+        resp.raise_for_status()
+        loc = resp.json().get("items", [])[0]
+        return loc["locationId"]
+
 def get_smartthings_devices():
     with httpx.Client(timeout=30) as client:
-        resp = client.get(f"{ST_API}/devices", headers={"Authorization":f"Bearer {ST_TOKEN}"})
+        resp = client.get(f"{ST_API}/devices", headers={"Authorization": f"Bearer {ST_TOKEN}"})
         resp.raise_for_status()
         return resp.json().get("items",[])
 
-def get_device_history(device_id):
-    """Pull device history from /v1/history/devices endpoint."""
-    headers = {"Authorization":f"Bearer {ST_TOKEN}"}
+def st_get(client, url, headers, params):
+    for _ in range(3):
+        resp = client.get(url, headers=headers, params=params)
+        if resp.status_code == 429:
+            try:
+                msg = resp.json().get("error",{}).get("details",[{}])[0].get("message","")
+                match = re.search(r'retry in (\d+) millis', msg)
+                wait = int(match.group(1)) / 1000 + 1 if match else 60
+            except:
+                wait = 60
+            print(f"    Rate limited, waiting {wait:.0f}s...")
+            time.sleep(wait)
+            continue
+        return resp
+    return resp
+
+def get_device_history(device_id, location_id):
+    headers = {"Authorization": f"Bearer {ST_TOKEN}"}
     all_items = []
     with httpx.Client(timeout=60) as client:
-        url = f"{ST_API}/history/devices"
-        params = {"deviceId": device_id, "limit": 200}
-        page = 0
-        while url:
-            resp = client.get(url, headers=headers, params=params)
-            resp.raise_for_status()
+        params = {"deviceId": device_id, "locationId": location_id, "limit": 200}
+        for page in range(1, 20):
+            resp = st_get(client, f"{ST_API}/history/devices", headers, params)
+            if resp.status_code != 200:
+                print(f"    HTTP {resp.status_code} on page {page}")
+                break
             data = resp.json()
-            items = data.get("items",[])
+            items = data.get("items", [])
+            if not items:
+                break
             all_items.extend(items)
-            page += 1
-            nl = data.get("_links",{}).get("next",{}).get("href")
-            if nl and len(items) > 0: url=nl; params={}
-            else: url=None
+            nl = data.get("_links", {}).get("next", {}).get("href")
+            if nl:
+                parsed = parse_qs(urlparse(nl).query)
+                params = {"deviceId": device_id, "locationId": location_id, "limit": 200}
+                for k in ["after", "afterHash", "before", "beforeHash"]:
+                    v = parsed.get(k, [None])[0]
+                    if v: params[k] = v
+            else:
+                break
     return all_items
 
 def history_to_readings(items, since):
-    """Convert history items to readings, filtering to lookback window."""
     buckets = {}
     for item in items:
-        attr = item.get("attribute", item.get("attributeName",""))
+        attr = item.get("attribute", "")
         value = item.get("value")
-        unit = item.get("unit","")
-        ts_str = item.get("eventTime") or item.get("createdDate") or item.get("stateChange") or ""
+        unit = item.get("unit", "")
+        ts_str = item.get("time", "")
         if not ts_str or value is None: continue
-        try: ts = datetime.fromisoformat(ts_str.replace("Z","+00:00"))
+        try: ts = datetime.fromisoformat(ts_str)
         except: continue
         if ts < since: continue
         bk = ts.replace(second=0, microsecond=0).isoformat()
-        if bk not in buckets: buckets[bk] = {"timestamp":bk}
-        if attr == "temperature":
-            temp = float(value)
-            if unit == "C": temp = temp*9/5+32
-            buckets[bk]["temp_f"] = round(temp,2)
-        elif attr == "humidity":
-            buckets[bk]["humidity_pct"] = round(float(value),2)
-        elif attr == "battery":
-            buckets[bk]["battery_pct"] = int(value)
+        if bk not in buckets: buckets[bk] = {"timestamp": bk}
+        try:
+            if attr == "temperature":
+                temp = float(value)
+                if "C" in unit and "F" not in unit: temp = temp * 9 / 5 + 32
+                buckets[bk]["temp_f"] = round(temp, 2)
+            elif attr == "humidity":
+                buckets[bk]["humidity_pct"] = round(float(value), 2)
+            elif attr == "battery":
+                buckets[bk]["battery_pct"] = int(float(value))
+        except (ValueError, TypeError):
+            pass
     return [b for b in buckets.values() if "temp_f" in b]
 
 def main():
@@ -120,6 +152,7 @@ def main():
     print(f"  Pulling history since {since.isoformat()} ({LOOKBACK_MINUTES}min lookback)")
     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
     weather = get_outdoor_weather()
+    location_id = get_location_id()
     devices = get_smartthings_devices()
     temp_sensors = [d for d in devices if any(cap.get("id")=="temperatureMeasurement" for comp in d.get("components",[]) for cap in comp.get("capabilities",[]))]
     print(f"  Found {len(temp_sensors)} temperature sensor(s)")
@@ -128,30 +161,35 @@ def main():
         device_id = device["deviceId"]
         device_label = device.get("label", device.get("name","unknown"))
         try:
-            items = get_device_history(device_id)
+            items = get_device_history(device_id, location_id)
             readings = history_to_readings(items, since)
             sensor_id = device_label.lower().replace(" ","_").replace("-","_")
             for reading in readings:
-                row = {"timestamp":reading["timestamp"],"sensor_id":sensor_id,"device_id":device_id,
+                all_rows.append({"timestamp":reading["timestamp"],"sensor_id":sensor_id,"device_id":device_id,
                     "temp_f":reading.get("temp_f"),"humidity_pct":reading.get("humidity_pct"),
-                    "battery_pct":reading.get("battery_pct"),**weather}
-                all_rows.append(row)
+                    "battery_pct":reading.get("battery_pct"),**weather})
             print(f"  {sensor_id}: {len(items)} events -> {len(readings)} readings")
         except Exception as e:
             print(f"  Error reading {device_label}: {e}", file=sys.stderr)
-    if not all_rows:
-        all_rows.append({"timestamp":now.isoformat(),"sensor_id":"outdoor_weather","device_id":"nws_api","temp_f":None,"humidity_pct":None,"battery_pct":None,**weather})
-        print("  No sensors found - logging outdoor weather only")
+    # Always log outdoor weather
     all_rows.append({"timestamp":now.isoformat(),"sensor_id":"outdoor_weather","device_id":"nws_api","temp_f":None,"humidity_pct":None,"battery_pct":None,**weather})
+    # Deduplicate within batch (same sensor_id + timestamp)
+    seen = set()
+    deduped = []
+    for row in all_rows:
+        key = (row["sensor_id"], row["timestamp"])
+        if key not in seen:
+            seen.add(key)
+            deduped.append(row)
     total = 0
-    for i in range(0, len(all_rows), 50):
-        batch = all_rows[i:i+50]
+    for i in range(0, len(deduped), 50):
+        batch = deduped[i:i+50]
         try:
             supabase.table("readings").upsert(batch, on_conflict="sensor_id,timestamp").execute()
             total += len(batch)
         except Exception as e:
             print(f"  Error upserting batch {i//50}: {e}", file=sys.stderr)
-    print(f"  Upserted {total} rows ({len(all_rows)} attempted)")
+    print(f"  Upserted {total} rows ({len(deduped)} attempted)")
 
 if __name__ == "__main__":
     main()

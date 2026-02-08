@@ -171,114 +171,132 @@ renderCarpetPlot = function(zones) {
 // Force re-render NOW
 if (lastData) renderAll(lastData, chartHours);
 
-// === SIDS THERMAL SAFETY MONITOR v3 — standalone interval, no wrapping ===
-// Reads lastData directly every 10 seconds. No function wrapping needed.
+// === SIDS THERMAL SAFETY MONITOR v3 — standalone interval ===
+// Master Bedroom (Christopher's bassinet)
 //
 // EVIDENCE BASE:
-//   AAP 2022 (Pediatrics, e2022057990): 68-72F recommended
-//   Cleveland Clinic: 65-70F recommended
-//   PMC (PMC9051231): thermal stress as continuous SIDS risk factor
-//   Multiple sources flag 75F (24C) as overheating onset
+//   AAP 2022 (Pediatrics, e2022057990): 68-72F recommended, no hard threshold
+//     defined; "definition of overheating varies across studies"
+//   Cleveland Clinic: 65-70F recommended range
+//   PMC/Frontiers (PMC9051231): hyperthermia/thermal stress as continuous
+//     SIDS risk factor; profuse sweating found at SIDS scenes
+//   Sleep Foundation / Pampers / Smart Sleep Coach: 75F (24C) flagged as
+//     overheating onset
 //   Japanese pediatric guidelines: 18-20C (64-68F)
 //
-// TIERS (30 min sustained): INFO >72F, WARNING >75F, DANGER >78F
+// TIERS (all require 30 min sustained):
+//   INFO    >72F — above AAP recommended ceiling
+//   WARNING >75F — overheating onset per multiple sources
+//   DANGER  >78F — clear thermal stress territory
+//
+// DURATION: 30 min sustained = all readings in window must exceed threshold.
+//   Prevents false alarms from brief spikes (door opened, shower steam, etc.)
+//
+// LOGGING: All WARNING and DANGER events are timestamped and stored in
+//   window._sidsLog for export.
 
 window._sidsLog = window._sidsLog || [];
 
 setInterval(function() {
-  if (typeof lastData === 'undefined' || !lastData || !lastData.zones) return;
+  try {
+    var data = window._hvacData ? window._hvacData() : (typeof lastData !== 'undefined' ? lastData : null);
+    if (!data || !data.zones) return;
 
-  var master = data.zones.find(function(z) { return z.id === 'master'; });
-  if (!master || !master.timeSeries || master.timeSeries.length < 3) return;
+    var master = data.zones.find(function(z) { return z.id === 'master'; });
+    if (!master || !master.timeSeries || master.timeSeries.length < 3) return;
 
-  var now = Date.now();
-  var cutoff30 = now - 30 * 60000;
-  var recent = master.timeSeries.filter(function(p) { return p.ts.getTime() >= cutoff30; });
-  if (recent.length < 3) return;
+    var now = Date.now();
+    var cutoff30 = now - 30 * 60000;
+    var recent = master.timeSeries.filter(function(p) { return p.ts.getTime() >= cutoff30; });
+    if (recent.length < 3) return;
 
-  var hour = new Date().getHours();
-  var isNight = (hour >= 22 || hour < 6);
-  var minTemp = Math.min.apply(null, recent.map(function(p) { return p.temp; }));
-  var avgTemp = recent.reduce(function(s, p) { return s + p.temp; }, 0) / recent.length;
+    var hour = new Date().getHours();
+    var isNight = (hour >= 22 || hour < 6);
+    var minTemp = Math.min.apply(null, recent.map(function(p) { return p.temp; }));
+    var avgTemp = recent.reduce(function(s, p) { return s + p.temp; }, 0) / recent.length;
 
-  var tier = null, tierLevel = '', tierLabel = '';
+    var tier = null, tierLevel = '', tierLabel = '';
 
-  if (minTemp > 78) {
-    tier = 'DANGER'; tierLevel = 'danger';
-    tierLabel = '\u26a0\ufe0f SIDS THERMAL STRESS: Master Bedroom ' +
-      avgTemp.toFixed(1) + '\u00b0F \u2014 sustained above 78\u00b0F for 30+ min. ' +
-      'Well above all pediatric guidelines (AAP: 68\u201372\u00b0F). ' +
-      (isNight ? 'Infant sleeping \u2014 immediate action needed.' : 'If infant is napping, take action.');
-  } else if (minTemp > 75) {
-    tier = 'WARNING'; tierLevel = 'warning';
-    tierLabel = '\u26a0 Overheating risk: Master Bedroom ' +
-      avgTemp.toFixed(1) + '\u00b0F \u2014 sustained above 75\u00b0F (24\u00b0C) for 30+ min. ' +
-      'Multiple sources flag this as overheating onset for infants.';
-  } else if (minTemp > 72) {
-    tier = 'INFO'; tierLevel = 'info';
-    tierLabel = '\u2139\ufe0f Nursery note: Master Bedroom ' +
-      avgTemp.toFixed(1) + '\u00b0F \u2014 above AAP recommended ceiling of 72\u00b0F.';
-  }
+    if (minTemp > 78) {
+      tier = 'DANGER'; tierLevel = 'danger';
+      tierLabel = '\u26a0\ufe0f SIDS THERMAL STRESS: Master Bedroom ' +
+        avgTemp.toFixed(1) + '\u00b0F \u2014 sustained above 78\u00b0F for 30+ min. ' +
+        'Well above all pediatric guidelines (AAP: 68\u201372\u00b0F). ' +
+        (isNight ? 'Infant sleeping \u2014 immediate action needed.' : 'If infant is napping, take action.');
+    } else if (minTemp > 75) {
+      tier = 'WARNING'; tierLevel = 'warning';
+      tierLabel = '\u26a0 Overheating risk: Master Bedroom ' +
+        avgTemp.toFixed(1) + '\u00b0F \u2014 sustained above 75\u00b0F (24\u00b0C) for 30+ min. ' +
+        'Multiple sources flag this as overheating onset for infants.';
+    } else if (minTemp > 72) {
+      tier = 'INFO'; tierLevel = 'info';
+      tierLabel = '\u2139\ufe0f Nursery note: Master Bedroom ' +
+        avgTemp.toFixed(1) + '\u00b0F \u2014 above AAP recommended ceiling of 72\u00b0F.';
+    }
 
-  // === ANOMALY BANNER ===
-  var ab = document.getElementById('anomalyBanner');
-  var sidsBanner = document.getElementById('sidsBanner');
-  if (tier && tierLabel) {
-    if (!sidsBanner) {
-      sidsBanner = document.createElement('div');
-      sidsBanner.id = 'sidsBanner';
-      sidsBanner.className = 'anomaly-banner';
-      if (ab) ab.parentNode.insertBefore(sidsBanner, ab);
-      else {
-        var dash = document.querySelector('.dashboard');
-        if (dash) dash.insertBefore(sidsBanner, dash.children[1]);
+    // === ANOMALY BANNER ===
+    var sidsBanner = document.getElementById('sidsBanner');
+    if (tier && tierLabel) {
+      if (!sidsBanner) {
+        sidsBanner = document.createElement('div');
+        sidsBanner.id = 'sidsBanner';
+        sidsBanner.className = 'anomaly-banner';
+        var ab = document.getElementById('anomalyBanner');
+        if (ab) ab.parentNode.insertBefore(sidsBanner, ab);
+        else {
+          var dash = document.querySelector('.dashboard');
+          if (dash) dash.insertBefore(sidsBanner, dash.children[1]);
+        }
+      }
+      sidsBanner.innerHTML = '<div class="anomaly-item" data-level="' + tierLevel + '">' + tierLabel + '</div>';
+      sidsBanner.style.display = '';
+    } else if (sidsBanner) {
+      sidsBanner.style.display = 'none';
+    }
+
+    // === STATUS BAR DOT ===
+    var sb = document.getElementById('statusBar');
+    if (sb) {
+      var existing = document.getElementById('sidsStatus');
+      if (!existing) {
+        existing = document.createElement('span');
+        existing.id = 'sidsStatus';
+        existing.style.cssText = 'margin-left:8px;font-size:0.85em;';
+        sb.appendChild(existing);
+      }
+      var temp = master.avgTemp != null ? master.avgTemp.toFixed(1) + '\u00b0F' : '?';
+      var dot, label;
+      if (tier === 'DANGER') { dot = '\ud83d\udd34'; label = 'SIDS DANGER'; }
+      else if (tier === 'WARNING') { dot = '\ud83d\udfe1'; label = 'SIDS WARNING'; }
+      else if (tier === 'INFO') { dot = '\ud83d\udfe0'; label = 'SIDS above range'; }
+      else if (isNight) { dot = '\ud83d\udfe2'; label = 'SIDS monitor OK'; }
+      else { dot = '\u26aa'; label = 'SIDS monitor'; }
+      var logNote = window._sidsLog.length > 0 ? ' \u00b7 ' + window._sidsLog.length + ' event(s)' : '';
+      existing.innerHTML = dot + ' ' + label + ' (Master: ' + temp + ')' + logNote;
+    }
+
+    // === LOG WARNING/DANGER ===
+    if (tier && tier !== 'INFO') {
+      var lastLog = window._sidsLog[window._sidsLog.length - 1];
+      var shouldLog = !lastLog || lastLog.tier !== tier || (now - new Date(lastLog.timestamp).getTime()) > 600000;
+      if (shouldLog) {
+        window._sidsLog.push({
+          timestamp: new Date().toISOString(),
+          tier: tier,
+          avgTemp: Math.round(avgTemp * 10) / 10,
+          minTemp: Math.round(minTemp * 10) / 10,
+          readingCount: recent.length,
+          isNight: isNight
+        });
       }
     }
-    sidsBanner.innerHTML = '<div class="anomaly-item" data-level="' + tierLevel + '">' + tierLabel + '</div>';
-    sidsBanner.style.display = '';
-  } else if (sidsBanner) {
-    sidsBanner.style.display = 'none';
-  }
-
-  // === STATUS BAR DOT ===
-  var sb = document.getElementById('statusBar');
-  if (sb) {
-    var existing = document.getElementById('sidsStatus');
-    if (!existing) {
-      existing = document.createElement('span');
-      existing.id = 'sidsStatus';
-      existing.style.cssText = 'margin-left:8px;font-size:0.85em;';
-      sb.appendChild(existing);
-    }
-    var temp = master.avgTemp != null ? master.avgTemp.toFixed(1) + '\u00b0F' : '?';
-    var dot, label;
-    if (tier === 'DANGER') { dot = '\ud83d\udd34'; label = 'SIDS DANGER'; }
-    else if (tier === 'WARNING') { dot = '\ud83d\udfe1'; label = 'SIDS WARNING'; }
-    else if (tier === 'INFO') { dot = '\ud83d\udfe0'; label = 'SIDS above range'; }
-    else if (isNight) { dot = '\ud83d\udfe2'; label = 'SIDS monitor OK'; }
-    else { dot = '\u26aa'; label = 'SIDS monitor'; }
-    var logNote = window._sidsLog.length > 0 ? ' \u00b7 ' + window._sidsLog.length + ' event(s)' : '';
-    existing.innerHTML = dot + ' ' + label + ' (Master: ' + temp + ')' + logNote;
-  }
-
-  // === LOG WARNING/DANGER ===
-  if (tier && tier !== 'INFO') {
-    var last = window._sidsLog[window._sidsLog.length - 1];
-    var shouldLog = !last || last.tier !== tier || (now - new Date(last.timestamp).getTime()) > 600000;
-    if (shouldLog) {
-      window._sidsLog.push({
-        timestamp: new Date().toISOString(),
-        tier: tier,
-        avgTemp: Math.round(avgTemp * 10) / 10,
-        minTemp: Math.round(minTemp * 10) / 10,
-        readingCount: recent.length,
-        isNight: isNight
-      });
-    }
+  } catch (e) {
+    console.error('[SIDS] Error:', e);
   }
 }, 10000);
 
 // === SIDS LOG EXPORT ===
+// Run in browser console: window._exportSidsLog()
 window._exportSidsLog = function() {
   var blob = new Blob([JSON.stringify(window._sidsLog, null, 2)], {type: 'application/json'});
   var a = document.createElement('a');

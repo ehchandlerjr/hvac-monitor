@@ -396,7 +396,7 @@ refresh = async function() {
 
 // Wrap renderChart() to add S2 reference line
 var _origRenderChart = renderChart;
-renderChart = function(zones, hours, diagnostics) {
+renderChart = function(zones, hours, diagnostics) { try {
   _origRenderChart(zones, hours, diagnostics);
   if (!window._s2) return;
 
@@ -486,11 +486,11 @@ renderChart = function(zones, hours, diagnostics) {
       '<span class="legend-swatch" style="background:#2196F3"></span>' +
       'S2 target (' + s2.targetF.toFixed(1) + '°F) · Out avg: ' + s2.outdoorAvgF.toFixed(1) + '°F</div>';
   }
-};
+} catch(e) { console.warn("[S2] renderChart overlay error:", e); } };
 
 // Wrap renderAnalysis to add S2 deviation metric
 var _origRenderAnalysis = renderAnalysis;
-renderAnalysis = function(zones, weather, spread, anomalies, diagnostics) {
+renderAnalysis = function(zones, weather, spread, anomalies, diagnostics) { try {
   _origRenderAnalysis(zones, weather, spread, anomalies, diagnostics);
   if (!window._s2) return;
   var panel = document.getElementById('analysisPanel');
@@ -516,7 +516,7 @@ renderAnalysis = function(zones, weather, spread, anomalies, diagnostics) {
       'Outdoor 24h avg: ' + s2.outdoorAvgF.toFixed(1) + '°F · ' + s2.readings + ' readings</span></div>';
     panel.appendChild(div);
   }
-};
+} catch(e) { console.warn("[S2] renderAnalysis error:", e); } };
 
 // === S2 DYNAMIC SETPOINT — Finnish Sisäilmastoluokitus 2018 ===
 // Source: VTT/Tampere/Aalto indoor climate classification
@@ -568,7 +568,7 @@ refresh = async function() {
 
 // Wrap renderChart() to add S2 reference line
 var _origRenderChart = renderChart;
-renderChart = function(zones, hours, diagnostics) {
+renderChart = function(zones, hours, diagnostics) { try {
   _origRenderChart(zones, hours, diagnostics);
   if (!window._s2) return;
 
@@ -657,11 +657,11 @@ renderChart = function(zones, hours, diagnostics) {
       '<span class="legend-swatch" style="background:#2196F3"></span>' +
       'S2 target (' + s2.targetF.toFixed(1) + '°F) · Out avg: ' + s2.outdoorAvgF.toFixed(1) + '°F</div>';
   }
-};
+} catch(e) { console.warn("[S2] renderChart overlay error:", e); } };
 
 // Wrap renderAnalysis to add S2 deviation metric
 var _origRenderAnalysis = renderAnalysis;
-renderAnalysis = function(zones, weather, spread, anomalies, diagnostics) {
+renderAnalysis = function(zones, weather, spread, anomalies, diagnostics) { try {
   _origRenderAnalysis(zones, weather, spread, anomalies, diagnostics);
   if (!window._s2) return;
   var panel = document.getElementById('analysisPanel');
@@ -686,4 +686,4 @@ renderAnalysis = function(zones, weather, spread, anomalies, diagnostics) {
       'Outdoor 24h avg: ' + s2.outdoorAvgF.toFixed(1) + '°F · ' + s2.readings + ' readings</span></div>';
     panel.appendChild(div);
   }
-};
+} catch(e) { console.warn("[S2] renderAnalysis error:", e); } };

@@ -460,7 +460,7 @@ window._exportSidsLog = function() {
       }
 
       // Analysis panel deviation
-      var panel = document.getElementById('analysisPanel');
+      var panel = document.getElementById('analysisGrid');
       if (panel && panel.innerHTML.indexOf('S2 deviation') === -1) {
         var devs = [];
         for (var k = 0; k < zones.length; k++) {
@@ -610,7 +610,7 @@ window._exportSidsLog = function() {
       var panel = document.getElementById('moldPanel');
       if (!panel) {
         // Create panel after analysis panel
-        var ap = document.getElementById('analysisPanel');
+        var ap = document.getElementById('analysisGrid');
         if (!ap) return;
         panel = document.createElement('div');
         panel.id = 'moldPanel';
@@ -697,6 +697,6 @@ window._exportSidsLog = function() {
 
   // Watch for data refreshes
   var obs = new MutationObserver(function() { setTimeout(renderMold, 150); });
-  var ap = document.getElementById('analysisPanel');
+  var ap = document.getElementById('analysisGrid');
   if (ap) obs.observe(ap, { childList: true });
 })();

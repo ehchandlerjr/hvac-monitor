@@ -191,9 +191,9 @@ function renderAll(data, chartHours) {
     svg.style.width='100%';
     for(const z of zones){
       const s=z.svg;
-      const rect=svgEl('rect',{x:s.x,y:s.y,width:s.w,height:s.h,rx:6,fill:z.online?'var(--surface-dim)':'var(--bg)',stroke:z.online?'var(--success)':'var(--text-muted)','stroke-width':z.online?2:1,opacity:z.online?1:0.5});
+      const rect=svgEl('rect',{x:s.x,y:s.y,width:s.w,height:s.h,rx:6}); rect.style.cssText='fill:var(--surface-dim);stroke:'+(z.online?'var(--success)':'var(--border)')+';stroke-width:'+(z.online?2:1)+';opacity:'+(z.online?1:0.6);
       svg.appendChild(rect);
-      const label=svgEl('text',{x:s.cx,y:s.y+50,'text-anchor':'middle',fill:'var(--text-secondary)','font-size':'11','font-family':'var(--font)'});
+      const label=svgEl('text',{x:s.cx,y:s.y+50,'text-anchor':'middle','font-size':'11'}); label.style.fill='var(--text-secondary)'; //,'font-size':'11','font-family':'var(--font)'});
       label.textContent=z.name;
       svg.appendChild(label);
       const temp=svgEl('text',{x:s.cx,y:s.y+80,'text-anchor':'middle',fill:z.online?'var(--text)':'var(--text-muted)','font-size':z.online?'22':'12','font-weight':z.online?'700':'400','font-family':'var(--font)'});

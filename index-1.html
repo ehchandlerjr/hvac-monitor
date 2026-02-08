@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="color-scheme" content="light dark">
+  <title>HVAC Thermal Monitor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/reset-1.css">
+  <link rel="stylesheet" href="css/tokens-1.css">
+  <link rel="stylesheet" href="css/layout-1.css">
+  <link rel="stylesheet" href="css/components-1.css">
+  <script>
+    try {
+      var t = localStorage.getItem('hvac-theme') || 'tenebrae';
+      document.addEventListener('DOMContentLoaded', function() { document.body.className = 't-' + t; });
+    } catch(e) {}
+  </script>
+</head>
+<body class="t-tenebrae">
+  <div class="dashboard">
+    <div class="top-bar">
+      <div>
+        <h1>HVAC Monitor</h1>
+        <span class="outdoor-badge" id="outdoorBadge"></span>
+      </div>
+      <div class="theme-switcher" id="themeSwitcher"></div>
+    </div>
+    <div class="anomaly-banner" id="anomalyBanner" style="display:none;"></div>
+    <div class="card"><div class="card-label">Floor Plan</div><div id="floorPlan"></div></div>
+    <div class="card"><div class="card-label">Zones</div><div id="zonesContainer"></div></div>
+    <div class="card"><div class="card-label">Setpoint Deviation</div><div id="bulletCharts"></div></div>
+    <div class="card" style="position:relative;">
+      <div class="chart-header">
+        <div class="card-label" style="margin:0;">Temperature History</div>
+        <div class="chart-tabs" id="chartTabs">
+          <button class="chart-tab" data-range="6">6h</button>
+          <button class="chart-tab" data-range="12">12h</button>
+          <button class="chart-tab active" data-range="24">24h</button>
+        </div>
+      </div>
+      <div class="ts-chart" id="tsChart"></div>
+      <div class="duty-gantt" id="dutyGantt"></div>
+      <div class="ts-legend" id="tsLegend"></div>
+    </div>
+    <div class="card">
+      <div class="card-label">Carpet Plot · 7-Day Thermal Fingerprint</div>
+      <div class="carpet-tabs" id="carpetTabs"></div>
+      <div id="carpetPlot"></div>
+    </div>
+    <div class="card">
+      <div class="card-label">Thermal Analysis</div>
+      <div class="analysis-grid" id="analysisGrid"></div>
+      <div class="card-label" style="margin-top:16px;">ΔT Room Differentials</div>
+      <div class="delta-grid" id="deltaGrid"></div>
+    </div>
+    <div class="card"><div class="card-label">Diagnostic Summary</div><div id="diagnosticSummary"></div></div>
+    <div class="status-bar" id="statusBar"><span><span class="status-dot offline"></span>Loading...</span></div>
+  </div>
+  <script src="js/bundle-1.js"></script>
+</body>
+</html>

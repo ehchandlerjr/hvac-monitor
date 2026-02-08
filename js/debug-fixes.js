@@ -497,3 +497,206 @@ window._exportSidsLog = function() {
   // Also run once now in case chart is already rendered
   setTimeout(overlayS2, 2000);
 })();
+
+// === MOLD INDEX GAUGE — Finnish VTT Viitanen-Ojanen Model ===
+// Source: VTT Technical Research Centre of Finland
+// Tracks mold growth potential via ODE integration: dM/dt = f(T, RH, material)
+// M scale: 0 (clean) → 1 (microscopic spores) → 3 (visible) → 6 (full coverage)
+// Material class: "sensitive" (wood framing) — appropriate for US townhouse
+//
+// Key advantage over simple "RH > 70% = bad": tracks cumulative exposure
+// AND models decline when conditions improve (dry/cold).
+//
+// EVIDENCE: If M > 1 in any zone, that's microscopic germination —
+// invisible but biologically active. Powerful habitability argument.
+
+(function() {
+  if (window._moldInit) return;
+  window._moldInit = true;
+  window._moldIndex = {}; // per zone: { M, trend[], peakM }
+
+  // Viitanen-Ojanen critical RH threshold (below this, no growth)
+  // RH_crit = -0.00267·T³ + 0.160·T² - 3.13·T + 100  (for T in °C)
+  function rhCrit(tc) {
+    if (tc < 0) return 100;
+    if (tc > 50) tc = 50;
+    return Math.max(0, Math.min(100,
+      -0.00267 * tc * tc * tc + 0.160 * tc * tc - 3.13 * tc + 100
+    ));
+  }
+
+  // Growth rate coefficient k1 for sensitive material (pine/wood)
+  // k1 depends on T and RH; simplified from VTT lookup tables
+  function k1(tc, rh) {
+    if (tc < 0 || tc > 50) return 0;
+    var rc = rhCrit(tc);
+    if (rh <= rc) return 0;
+    // Sensitive material: k1 ~ 1 at optimal conditions (T~25, RH~97)
+    // Scale by distance from critical
+    var rhExcess = (rh - rc) / (100 - rc + 0.01);
+    var tFactor = tc < 5 ? tc / 5 : (tc < 35 ? 1 : Math.max(0, (50 - tc) / 15));
+    return 0.14 * rhExcess * tFactor; // tuned for sensitive wood
+  }
+
+  // Decline rate when conditions are unfavorable
+  // VTT model: M decreases when RH < RH_crit or T < 0
+  function declineRate(M, tc, rh) {
+    var rc = rhCrit(tc);
+    if (rh >= rc && tc >= 0) return 0; // favorable — no decline
+    // Decline: -0.032/day for sensitive materials when dry
+    // Faster decline at lower RH and lower T
+    var dryness = Math.max(0, (rc - rh) / rc);
+    return -0.032 * (1 + dryness); // per day, negative
+  }
+
+  function computeMold() {
+    try {
+      if (!lastData) return;
+
+      for (var zi = 0; zi < lastData.zones.length; zi++) {
+        var zone = lastData.zones[zi];
+        var ts = zone.timeSeries;
+        if (!ts || ts.length < 6) continue;
+
+        // Initialize if needed
+        if (!window._moldIndex[zone.id]) {
+          window._moldIndex[zone.id] = { M: 0, trend: [], peakM: 0, lastTs: 0 };
+        }
+        var state = window._moldIndex[zone.id];
+
+        // Process time series points we haven't seen yet
+        for (var i = 0; i < ts.length; i++) {
+          var tMs = ts[i].ts.getTime();
+          if (tMs <= state.lastTs) continue;
+          if (ts[i].hum == null) continue;
+
+          var tc = (ts[i].temp - 32) * 5 / 9;
+          var rh = ts[i].hum;
+
+          // Time step in days (5-min intervals = 5/1440 days)
+          var dt = state.lastTs > 0 ? (tMs - state.lastTs) / 86400000 : 5 / 1440;
+          if (dt > 1) dt = 5 / 1440; // cap if gap in data
+          if (dt <= 0) continue;
+
+          // Growth or decline
+          var growth = k1(tc, rh);
+          var decline = declineRate(state.M, tc, rh);
+          var dM = (growth > 0 ? growth : decline) * dt;
+
+          state.M = Math.max(0, Math.min(6, state.M + dM));
+          state.peakM = Math.max(state.peakM, state.M);
+          state.lastTs = tMs;
+        }
+
+        // Record trend point (one per compute cycle)
+        state.trend.push({ ts: Date.now(), M: state.M });
+        if (state.trend.length > 288) state.trend.shift(); // keep ~24h at 5-min
+      }
+
+      renderMold();
+      console.log('[MOLD] Index updated:', Object.keys(window._moldIndex).map(function(k) {
+        return k + ': M=' + window._moldIndex[k].M.toFixed(3);
+      }).join(', '));
+    } catch (e) {
+      console.warn('[MOLD] compute error:', e);
+    }
+  }
+
+  function renderMold() {
+    try {
+      if (!lastData) return;
+
+      // Find or create mold panel
+      var panel = document.getElementById('moldPanel');
+      if (!panel) {
+        // Create panel after analysis panel
+        var ap = document.getElementById('analysisPanel');
+        if (!ap) return;
+        panel = document.createElement('div');
+        panel.id = 'moldPanel';
+        panel.className = 'card';
+        ap.parentNode.insertBefore(panel, ap.nextSibling);
+      }
+
+      var zones = lastData.zones;
+      var html = '<h2 class="card-title">MOLD RISK INDEX</h2>' +
+        '<div style="opacity:0.7;font-size:0.8em;margin-bottom:12px">' +
+        'Viitanen-Ojanen model (VTT Finland) · Wood-frame "sensitive" class · Scale: 0–6</div>';
+
+      for (var zi = 0; zi < zones.length; zi++) {
+        var zone = zones[zi];
+        var state = window._moldIndex[zone.id];
+        if (!state) continue;
+
+        var M = state.M;
+        var pct = Math.min(100, (M / 6) * 100);
+
+        // Color: 0-1 green, 1-3 yellow, 3-6 red
+        var color, label;
+        if (M < 0.5) { color = 'var(--ok)'; label = 'Safe'; }
+        else if (M < 1) { color = 'var(--ok)'; label = 'Low risk'; }
+        else if (M < 2) { color = 'var(--wn)'; label = 'Microscopic spores possible'; }
+        else if (M < 3) { color = 'var(--wn)'; label = 'Microscopic growth likely'; }
+        else if (M < 4) { color = 'var(--dg)'; label = 'Visible mold possible'; }
+        else { color = 'var(--dg)'; label = 'Extensive colonization'; }
+
+        html += '<div style="margin-bottom:10px">' +
+          '<div class="metric-row"><span class="metric-label">' + zone.name + '</span>' +
+          '<span class="metric-value" style="color:' + color + '">' +
+          'M = ' + M.toFixed(2) + ' — ' + label + '</span></div>' +
+          // Progress bar
+          '<div style="height:8px;background:var(--sd);border-radius:4px;overflow:hidden;margin:4px 0">' +
+          '<div style="height:100%;width:' + pct + '%;border-radius:4px;' +
+          'background:linear-gradient(90deg, var(--ok) 0%, var(--wn) 50%, var(--dg) 100%)"></div></div>' +
+          // Scale labels
+          '<div style="display:flex;justify-content:space-between;font-size:0.65em;opacity:0.5">' +
+          '<span>0 clean</span><span>1 spores</span><span>3 visible</span><span>6 full</span></div>' +
+          '</div>';
+      }
+
+      // Footnote
+      html += '<div style="opacity:0.6;font-size:0.75em;margin-top:8px;border-top:1px solid var(--bd);padding-top:6px">' +
+        'M > 1 = microscopic germination (invisible but biologically active). ' +
+        'M > 3 = visible mold growth. Model tracks cumulative exposure and declines when conditions improve. ' +
+        'Based on indoor T + RH at each 5-min reading. Wood-frame construction = "sensitive" material class.</div>';
+
+      panel.innerHTML = html;
+
+      // Also add anomaly if any zone M > 1
+      // (don't duplicate — check if already present)
+      if (lastData.anomalies) {
+        for (var k in window._moldIndex) {
+          if (window._moldIndex[k].M >= 1) {
+            var zName = '';
+            for (var z = 0; z < zones.length; z++) {
+              if (zones[z].id === k) zName = zones[z].name;
+            }
+            var moldMsg = '\u26a0 Mold risk: ' + zName + ' M=' + window._moldIndex[k].M.toFixed(2) +
+              ' — microscopic germination threshold exceeded';
+            var exists = false;
+            for (var a = 0; a < lastData.anomalies.length; a++) {
+              if (lastData.anomalies[a].msg.indexOf('Mold risk') !== -1 &&
+                  lastData.anomalies[a].msg.indexOf(zName) !== -1) {
+                exists = true; break;
+              }
+            }
+            if (!exists) {
+              lastData.anomalies.push({ level: 'warning', msg: moldMsg });
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[MOLD] render error:', e);
+    }
+  }
+
+  // Run after each refresh
+  computeMold();
+  setInterval(computeMold, 300000);
+
+  // Watch for data refreshes
+  var obs = new MutationObserver(function() { setTimeout(renderMold, 150); });
+  var ap = document.getElementById('analysisPanel');
+  if (ap) obs.observe(ap, { childList: true });
+})();

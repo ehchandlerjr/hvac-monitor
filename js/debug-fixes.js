@@ -188,7 +188,7 @@ window._sidsLog = window._sidsLog || [];
 setInterval(function() {
   if (typeof lastData === 'undefined' || !lastData || !lastData.zones) return;
 
-  var master = lastData.zones.find(function(z) { return z.id === 'master'; });
+  var master = data.zones.find(function(z) { return z.id === 'master'; });
   if (!master || !master.timeSeries || master.timeSeries.length < 3) return;
 
   var now = Date.now();

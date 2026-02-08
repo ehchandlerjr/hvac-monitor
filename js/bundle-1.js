@@ -1026,7 +1026,7 @@ function renderStatus(zones, readingCount, weather) {
 
 // ── MAIN LOOP ────────────────────────────────────────────────
 let chartHours = 24;
-let lastData = null;
+let lastData = null; window._hvacData = function() { return lastData; };
 
 async function refresh() {
   try {

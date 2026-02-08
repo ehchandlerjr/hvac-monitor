@@ -684,3 +684,285 @@ window._exportSidsLog = function() {
   var agEl = document.getElementById('analysisGrid');
   if (agEl) new MutationObserver(function() { setTimeout(renderExtrasPanel, 100); }).observe(agEl, { childList: true });
 })();
+
+// === FOPDT SYSTEM IDENTIFICATION — Japanese SHASE Method ===
+// Fits First Order Plus Dead Time model to each HVAC-on event:
+//   T(t) = T_start + K × (1 - e^(-(t-L)/τ))
+//
+// τ = time constant (how fast zone responds)
+// K = gain (steady-state temp change achieved)
+// L = dead time (delay before temp starts rising)
+//
+// FAULT SIGNATURES:
+//   Damper stuck:     τ↑↑ in ONE zone, K↓↓, L normal
+//   Refrigerant leak: τ↑ in ALL zones, K↓ gradual
+//   EEV failure:      τ↑ moderate, L↑↑
+//   Thermostat fault: τ normal, K normal, but T_final ≠ setpoint
+
+(function() {
+  if (window._fopdtInit) return;
+  window._fopdtInit = true;
+  window._fopdtResults = null;
+
+  function computeFOPDT() {
+    try {
+      if (!lastData || !lastData.diagnostics) return;
+
+      var results = [];
+
+      for (var zi = 0; zi < lastData.zones.length; zi++) {
+        var zone = lastData.zones[zi];
+        var ts = zone.timeSeries;
+        if (!ts || ts.length < 12) continue;
+
+        var diag = lastData.diagnostics.zoneResults.find(function(d) { return d.zoneId === zone.id; });
+        if (!diag || !diag.cycles || diag.cycles.length === 0) continue;
+
+        var fits = [];
+
+        for (var ci = 0; ci < diag.cycles.length; ci++) {
+          var cycle = diag.cycles[ci];
+          if (!cycle.on) continue;
+          var durMin = (cycle.endTs - cycle.startTs) / 60000;
+          if (durMin < 15) continue; // need at least 15 min for meaningful fit
+
+          // Get time series points within this heating segment
+          var pts = [];
+          for (var p = 0; p < ts.length; p++) {
+            var tMs = ts[p].ts.getTime();
+            if (tMs >= cycle.startTs.getTime() && tMs <= cycle.endTs.getTime()) {
+              pts.push({ t: (tMs - cycle.startTs.getTime()) / 60000, temp: ts[p].temp }); // t in minutes
+            }
+          }
+          if (pts.length < 4) continue;
+
+          var T_start = pts[0].temp;
+          var T_final = pts[pts.length - 1].temp;
+          var K_est = T_final - T_start;
+          if (K_est < 0.3) continue; // heating event too small
+
+          // Estimate dead time L: find when temp first rises > 0.1°F above start
+          var L_est = 0;
+          for (var li = 1; li < pts.length; li++) {
+            if (pts[li].temp - T_start > 0.1) {
+              L_est = pts[li].t;
+              break;
+            }
+          }
+
+          // Estimate τ using 63.2% method:
+          // At t = L + τ, response reaches 63.2% of final value
+          var target632 = T_start + K_est * 0.632;
+          var tau_est = null;
+          for (var ti = 0; ti < pts.length; ti++) {
+            if (pts[ti].temp >= target632 && pts[ti].t > L_est) {
+              tau_est = pts[ti].t - L_est;
+              break;
+            }
+          }
+
+          // If 63.2% not reached, estimate from slope at inflection
+          if (tau_est == null && pts.length >= 4) {
+            // Use initial slope after dead time: τ ≈ K / (dT/dt at t=L)
+            var slopeStart = -1;
+            for (var si = 0; si < pts.length; si++) {
+              if (pts[si].t >= L_est) { slopeStart = si; break; }
+            }
+            if (slopeStart >= 0 && slopeStart + 2 < pts.length) {
+              var dt = pts[slopeStart + 2].t - pts[slopeStart].t;
+              var dTemp = pts[slopeStart + 2].temp - pts[slopeStart].temp;
+              if (dt > 0 && dTemp > 0) {
+                tau_est = K_est / (dTemp / dt);
+              }
+            }
+          }
+
+          if (tau_est == null || tau_est <= 0) continue;
+
+          // Compute fit quality: R² of FOPDT model vs actual
+          var ssRes = 0, ssTot = 0;
+          var meanTemp = pts.reduce(function(s, p) { return s + p.temp; }, 0) / pts.length;
+          for (var ri = 0; ri < pts.length; ri++) {
+            var tAdj = pts[ri].t - L_est;
+            var predicted = tAdj <= 0 ? T_start : T_start + K_est * (1 - Math.exp(-tAdj / tau_est));
+            ssRes += (pts[ri].temp - predicted) * (pts[ri].temp - predicted);
+            ssTot += (pts[ri].temp - meanTemp) * (pts[ri].temp - meanTemp);
+          }
+          var r2 = ssTot > 0 ? 1 - ssRes / ssTot : 0;
+
+          if (r2 > 0.3) { // reasonable fit
+            fits.push({
+              tau: Math.round(tau_est * 10) / 10,   // minutes
+              K: Math.round(K_est * 100) / 100,      // °F
+              L: Math.round(L_est * 10) / 10,        // minutes
+              r2: Math.round(r2 * 100) / 100,
+              durMin: Math.round(durMin),
+              startTime: new Date(cycle.startTs).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})
+            });
+          }
+        }
+
+        if (fits.length > 0) {
+          // Average the parameters across all good fits
+          var avgTau = 0, avgK = 0, avgL = 0, avgR2 = 0;
+          for (var f = 0; f < fits.length; f++) {
+            avgTau += fits[f].tau; avgK += fits[f].K;
+            avgL += fits[f].L; avgR2 += fits[f].r2;
+          }
+          var n = fits.length;
+          results.push({
+            zone: zone.name,
+            zoneId: zone.id,
+            tau: Math.round((avgTau / n) * 10) / 10,
+            K: Math.round((avgK / n) * 100) / 100,
+            L: Math.round((avgL / n) * 10) / 10,
+            r2: Math.round((avgR2 / n) * 100) / 100,
+            eventCount: n,
+            fits: fits
+          });
+        }
+      }
+
+      window._fopdtResults = results.length > 0 ? results : null;
+
+      if (results.length > 0) {
+        console.log('[FOPDT] Results:', results.map(function(r) {
+          return r.zone + ': \u03c4=' + r.tau + 'min K=' + r.K + '\u00b0F L=' + r.L + 'min (' + r.eventCount + ' events)';
+        }).join(', '));
+        renderFOPDT();
+      } else {
+        console.log('[FOPDT] No valid heating events found yet');
+      }
+    } catch (e) { console.warn('[FOPDT] compute error:', e); }
+  }
+
+  function classifyFaults(results) {
+    if (results.length < 2) return [];
+    var faults = [];
+
+    // Compute averages across all zones
+    var allTau = results.map(function(r) { return r.tau; });
+    var allK = results.map(function(r) { return r.K; });
+    var allL = results.map(function(r) { return r.L; });
+    var meanTau = allTau.reduce(function(a,b){return a+b;},0) / allTau.length;
+    var meanK = allK.reduce(function(a,b){return a+b;},0) / allK.length;
+    var meanL = allL.reduce(function(a,b){return a+b;},0) / allL.length;
+
+    for (var i = 0; i < results.length; i++) {
+      var r = results[i];
+      var tauRatio = meanTau > 0 ? r.tau / meanTau : 1;
+      var kRatio = meanK > 0 ? r.K / meanK : 1;
+      var lRatio = meanL > 0 ? r.L / meanL : 1;
+
+      // Damper stuck: τ way above average for THIS zone, K way below
+      if (tauRatio > 1.8 && kRatio < 0.6) {
+        faults.push({ zone: r.zone, type: 'Possible damper restriction',
+          detail: '\u03c4 is ' + tauRatio.toFixed(1) + '\u00d7 avg, gain is ' + Math.round(kRatio*100) + '% of avg',
+          severity: 'warning' });
+      }
+
+      // EEV failure: high dead time
+      if (lRatio > 2.0 && r.L > 5) {
+        faults.push({ zone: r.zone, type: 'High dead time',
+          detail: 'L=' + r.L + ' min (' + lRatio.toFixed(1) + '\u00d7 avg) — possible EEV or valve delay',
+          severity: 'info' });
+      }
+    }
+
+    // All zones high τ = system-wide issue (refrigerant?)
+    var highTauCount = allTau.filter(function(t) { return t > 30; }).length;
+    if (highTauCount === allTau.length && allTau.length >= 2) {
+      faults.push({ zone: 'All zones', type: 'System-wide slow response',
+        detail: 'All zones \u03c4 > 30min — possible refrigerant charge issue or undersized equipment',
+        severity: 'warning' });
+    }
+
+    return faults;
+  }
+
+  function renderFOPDT() {
+    try {
+      if (!window._fopdtResults) return;
+      var panel = document.getElementById('fopdtPanel');
+      if (!panel) {
+        var ref = document.getElementById('extrasPanel');
+        if (!ref) return;
+        panel = document.createElement('div');
+        panel.id = 'fopdtPanel';
+        ref.parentNode.insertBefore(panel, ref.nextSibling);
+      }
+
+      var results = window._fopdtResults;
+      var faults = classifyFaults(results);
+
+      var html = '<div class="card" style="margin-bottom:12px"><h2 class="card-title">HVAC RESPONSE (FOPDT)</h2>';
+
+      // Main table — numbers first
+      html += '<table style="width:100%;border-collapse:collapse;font-size:0.9em">';
+      html += '<tr style="opacity:0.6;font-size:0.8em">' +
+        '<td>Zone</td>' +
+        '<td style="text-align:right">\u03c4 (min)</td>' +
+        '<td style="text-align:right">Gain (\u00b0F)</td>' +
+        '<td style="text-align:right">Delay (min)</td>' +
+        '<td style="text-align:right">Events</td></tr>';
+
+      // Find averages for color-coding
+      var meanTau = results.reduce(function(s,r){return s+r.tau;},0) / results.length;
+
+      for (var i = 0; i < results.length; i++) {
+        var r = results[i];
+        var tauColor = r.tau > meanTau * 1.5 ? 'var(--dg)' : r.tau > meanTau * 1.2 ? 'var(--wn)' : 'var(--ok)';
+        var lColor = r.L > 5 ? 'var(--wn)' : 'var(--ok)';
+
+        html += '<tr>' +
+          '<td>' + r.zone + '</td>' +
+          '<td style="text-align:right;font-weight:600;color:' + tauColor + '">' + r.tau.toFixed(1) + '</td>' +
+          '<td style="text-align:right">' + r.K.toFixed(1) + '</td>' +
+          '<td style="text-align:right;color:' + lColor + '">' + r.L.toFixed(1) + '</td>' +
+          '<td style="text-align:right;opacity:0.6">' + r.eventCount + '</td></tr>';
+      }
+      html += '</table>';
+
+      // Fault flags — clear, actionable
+      if (faults.length > 0) {
+        html += '<div style="margin-top:8px;padding:6px;background:var(--sd);border-radius:4px">';
+        for (var fi = 0; fi < faults.length; fi++) {
+          var f = faults[fi];
+          var icon = f.severity === 'warning' ? '\u26a0\ufe0f' : '\u2139\ufe0f';
+          html += '<div style="margin-bottom:4px;font-size:0.85em">' +
+            icon + ' <strong>' + f.zone + '</strong>: ' + f.type +
+            ' <span style="opacity:0.6">(' + f.detail + ')</span></div>';
+        }
+        html += '</div>';
+      }
+
+      // Education behind toggle
+      html += '<details style="margin-top:8px;font-size:0.75em;opacity:0.6"><summary style="cursor:pointer">\u2139\ufe0f What do these numbers mean?</summary>' +
+        '<p style="margin:4px 0"><b>\u03c4 (time constant)</b>: How many minutes until the zone reaches 63% of its final temp after HVAC turns on. ' +
+        'Lower = faster response. If one zone is much higher than others, its damper may be restricted.</p>' +
+        '<p style="margin:4px 0"><b>Gain</b>: Total temperature rise (\u00b0F) achieved per heating cycle. ' +
+        'Low gain = insufficient heating delivery to that zone.</p>' +
+        '<p style="margin:4px 0"><b>Delay</b>: Minutes after HVAC starts before temperature begins rising. ' +
+        'High delay in one zone suggests valve or damper actuation problems.</p>' +
+        '<table style="width:100%;font-size:0.95em;margin-top:6px;border-collapse:collapse">' +
+        '<tr style="font-weight:600"><td></td><td>Damper stuck</td><td>Refrigerant leak</td><td>EEV failure</td></tr>' +
+        '<tr><td>\u03c4</td><td>\u2191\u2191 one zone</td><td>\u2191 all zones</td><td>\u2191 moderate</td></tr>' +
+        '<tr><td>Gain</td><td>\u2193\u2193</td><td>\u2193 gradual</td><td>\u2193</td></tr>' +
+        '<tr><td>Delay</td><td>Normal</td><td>Normal</td><td>\u2191\u2191</td></tr>' +
+        '</table></details>';
+
+      html += '</div>';
+      panel.innerHTML = html;
+    } catch (e) { console.warn('[FOPDT] render error:', e); }
+  }
+
+  // Run on interval
+  computeFOPDT();
+  setInterval(computeFOPDT, 300000);
+
+  // Watch for data refresh
+  var ag = document.getElementById('analysisGrid');
+  if (ag) new MutationObserver(function() {
+    setTimeout(computeFOPDT, 200);
+  }).observe(ag, { childList: true });
+})();

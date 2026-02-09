@@ -123,30 +123,61 @@ def get_device_history(device_id, location_id):
     return all_items
 
 def history_to_readings(items, since):
-    buckets = {}
+    """Parse history items into readings, matching humidity to nearest temp."""
+    temp_events = []
+    humidity_events = []
+    battery_events = []
     for item in items:
         attr = item.get("attribute", "")
         value = item.get("value")
         unit = item.get("unit", "")
         ts_str = item.get("time", "")
-        if not ts_str or value is None: continue
-        try: ts = datetime.fromisoformat(ts_str)
-        except: continue
-        if ts < since: continue
-        bk = ts.replace(second=0, microsecond=0).isoformat()
-        if bk not in buckets: buckets[bk] = {"timestamp": bk}
+        if not ts_str or value is None:
+            continue
+        try:
+            ts = datetime.fromisoformat(ts_str)
+        except:
+            continue
+        if ts < since:
+            continue
         try:
             if attr == "temperature":
                 temp = float(value)
-                if "C" in unit and "F" not in unit: temp = temp * 9 / 5 + 32
-                buckets[bk]["temp_f"] = round(temp, 2)
+                if "C" in unit and "F" not in unit:
+                    temp = temp * 9 / 5 + 32
+                temp_events.append({"ts": ts, "temp_f": round(temp, 2)})
             elif attr in ("humidity", "relativeHumidity"):
-                buckets[bk]["humidity_pct"] = round(float(value), 2)
+                humidity_events.append({"ts": ts, "val": round(float(value), 2)})
             elif attr == "battery":
-                buckets[bk]["battery_pct"] = int(float(value))
+                battery_events.append({"ts": ts, "val": int(float(value))})
         except (ValueError, TypeError):
             pass
-    return [b for b in buckets.values() if "temp_f" in b]
+    # Build readings from temperature events, attach nearest humidity/battery
+    readings = []
+    for te in temp_events:
+        r = {"timestamp": te["ts"].replace(second=0, microsecond=0).isoformat(), "temp_f": te["temp_f"]}
+        # Find closest humidity within 5 minutes
+        best_h = None
+        best_h_gap = 300  # 5 min max
+        for he in humidity_events:
+            gap = abs((te["ts"] - he["ts"]).total_seconds())
+            if gap < best_h_gap:
+                best_h_gap = gap
+                best_h = he["val"]
+        if best_h is not None:
+            r["humidity_pct"] = best_h
+        # Find closest battery within 30 minutes
+        best_b = None
+        best_b_gap = 1800
+        for be in battery_events:
+            gap = abs((te["ts"] - be["ts"]).total_seconds())
+            if gap < best_b_gap:
+                best_b_gap = gap
+                best_b = be["val"]
+        if best_b is not None:
+            r["battery_pct"] = best_b
+        readings.append(r)
+    return readings
 
 def main():
     now = datetime.now(timezone.utc)

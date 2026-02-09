@@ -1655,3 +1655,134 @@ window._exportSidsLog = function() {
   var ag = document.getElementById('analysisGrid');
   if (ag) new MutationObserver(function() { setTimeout(buildDurationCurve, 500); }).observe(ag, { childList: true });
 })();
+
+// === ENERGY SIGNATURE — Phase Space (Category 3) ===
+(function(){
+if(window._energySigInit)return;window._energySigInit=true;
+var ZC=['#e53e3e','#dd6b20','#38a169','#4299e1'];
+function cv(n){return getComputedStyle(document.documentElement).getPropertyValue(n).trim();}
+function build(){
+try{
+var data=typeof window._hvacData==='function'?window._hvacData():null;
+if(!data||!data.zones||!data.weather||data.weather.tempF==null)return;
+var zr=[],allDT=[],allR=[];
+for(var zi=0;zi<data.zones.length;zi++){
+var zone=data.zones[zi];if(!zone.readings||zone.readings.length<6)continue;
+var pts=[];
+for(var i=1;i<zone.readings.length;i++){
+var t0=zone.readings[i-1],t1=zone.readings[i];
+if(t0.temp==null||t1.temp==null)continue;
+var dt=(new Date(t1.timestamp||t1.ts).getTime()-new Date(t0.timestamp||t0.ts).getTime())/3600000;
+if(dt<0.05||dt>0.75)continue;
+var rate=(t1.temp-t0.temp)/dt;
+if(rate>=-0.1)continue;
+var tIn=(t0.temp+t1.temp)/2,deltaT=tIn-data.weather.tempF;
+if(deltaT<5)continue;
+pts.push({deltaT:deltaT,rate:Math.abs(rate)});
+}
+if(pts.length<3)continue;
+var sx=0,sy=0,sxy=0,sx2=0,n=pts.length;
+for(var p=0;p<n;p++){sx+=pts[p].deltaT;sy+=pts[p].rate;sxy+=pts[p].deltaT*pts[p].rate;sx2+=pts[p].deltaT*pts[p].deltaT;}
+var den=n*sx2-sx*sx,slope=den?((n*sxy-sx*sy)/den):0,inter=(sy-slope*sx)/n;
+var my=sy/n,sst=0,ssr=0;
+for(var p2=0;p2<n;p2++){var pr=slope*pts[p2].deltaT+inter;ssr+=(pts[p2].rate-pr)*(pts[p2].rate-pr);sst+=(pts[p2].rate-my)*(pts[p2].rate-my);}
+var r2=sst>0?1-ssr/sst:0;
+for(var p3=0;p3<pts.length;p3++){allDT.push(pts[p3].deltaT);allR.push(pts[p3].rate);}
+zr.push({name:zone.name,pts:pts,slope:Math.round(slope*1000)/1000,inter:Math.round(inter*100)/100,r2:Math.round(r2*100)/100,color:ZC[zi%4],n:n});
+}
+if(zr.length===0)return;
+window._energySigResults=zr;
+var dtMin=Math.floor(Math.min.apply(null,allDT)),dtMax=Math.ceil(Math.max.apply(null,allDT));
+var rMax=Math.ceil(Math.max.apply(null,allR)*1.2);if(rMax<2)rMax=2;
+var W=580,H=320,p={t:30,r:105,b:45,l:55},pw=W-p.l-p.r,ph=H-p.t-p.b;
+function xs(v){return p.l+((v-dtMin)/(dtMax-dtMin))*pw;}
+function ys(v){return p.t+(1-v/rMax)*ph;}
+var fg=cv('--fg')||'#ccc',gc=cv('--grid')||'rgba(255,255,255,0.08)',bg=cv('--card-bg')||'#1a1a2e';
+var s='<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;max-width:600px;font-family:inherit">';
+s+='<rect width="'+W+'" height="'+H+'" fill="'+bg+'" rx="8"/>';
+for(var gr=0;gr<=rMax;gr+=Math.max(0.5,Math.round(rMax/5*2)/2)){var gy=ys(gr);if(gy>=p.t&&gy<=H-p.b){s+='<line x1="'+p.l+'" y1="'+gy+'" x2="'+(W-p.r)+'" y2="'+gy+'" stroke="'+gc+'" stroke-width="0.5"/>';s+='<text x="'+(p.l-6)+'" y="'+(gy+4)+'" text-anchor="end" fill="'+fg+'" font-size="9" opacity="0.6">'+gr.toFixed(1)+'</text>';}}
+var ds=Math.max(2,Math.round((dtMax-dtMin)/6));
+for(var gd=Math.ceil(dtMin/ds)*ds;gd<=dtMax;gd+=ds){var gx=xs(gd);s+='<line x1="'+gx+'" y1="'+p.t+'" x2="'+gx+'" y2="'+(H-p.b)+'" stroke="'+gc+'" stroke-width="0.5"/>';s+='<text x="'+gx+'" y="'+(H-p.b+14)+'" text-anchor="middle" fill="'+fg+'" font-size="9" opacity="0.6">'+gd+'\u00b0</text>';}
+s+='<text x="'+(p.l+pw/2)+'" y="'+(H-4)+'" text-anchor="middle" fill="'+fg+'" font-size="10" opacity="0.7">\u0394T Indoor\u2013Outdoor (\u00b0F)</text>';
+s+='<text x="13" y="'+(p.t+ph/2)+'" text-anchor="middle" fill="'+fg+'" font-size="10" opacity="0.7" transform="rotate(-90,13,'+(p.t+ph/2)+')">Cooling Rate (\u00b0F/hr)</text>';
+var maxSlope=0;
+for(var z=0;z<zr.length;z++){
+var c=zr[z];if(c.slope>maxSlope)maxSlope=c.slope;
+for(var pp=0;pp<c.pts.length;pp++){var cx=xs(c.pts[pp].deltaT),cy=ys(c.pts[pp].rate);if(cx>=p.l&&cx<=W-p.r&&cy>=p.t&&cy<=H-p.b)s+='<circle cx="'+cx.toFixed(1)+'" cy="'+cy.toFixed(1)+'" r="3" fill="'+c.color+'" opacity="0.45"/>';}
+var ry1=Math.max(0,Math.min(rMax,c.slope*dtMin+c.inter)),ry2=Math.max(0,Math.min(rMax,c.slope*dtMax+c.inter));
+s+='<line x1="'+xs(dtMin).toFixed(1)+'" y1="'+ys(ry1).toFixed(1)+'" x2="'+xs(dtMax).toFixed(1)+'" y2="'+ys(ry2).toFixed(1)+'" stroke="'+c.color+'" stroke-width="2" stroke-dasharray="6,3" opacity="0.9"/>';
+}
+var ly=p.t+6;
+for(var li=0;li<zr.length;li++){var sn=zr[li].name.replace(/___.*/, '').replace(/_/g,' ');s+='<rect x="'+(W-p.r+4)+'" y="'+ly+'" width="8" height="8" fill="'+zr[li].color+'" rx="1"/>';s+='<text x="'+(W-p.r+16)+'" y="'+(ly+8)+'" fill="'+fg+'" font-size="8">'+sn+'</text>';ly+=12;s+='<text x="'+(W-p.r+16)+'" y="'+(ly+4)+'" fill="'+fg+'" font-size="7" opacity="0.5">m='+zr[li].slope+' R\u00b2='+zr[li].r2+'</text>';ly+=14;}
+s+='<text x="'+(p.l+pw/2)+'" y="16" text-anchor="middle" fill="'+fg+'" font-size="12" font-weight="600">Energy Signature \u2014 Heat Loss vs \u0394T</text>';
+s+='</svg>';
+var th='<table style="width:100%;border-collapse:collapse;font-size:0.82em;margin-top:6px"><tr style="opacity:0.5;font-size:0.85em"><td>Zone</td><td style="text-align:right">Slope</td><td style="text-align:right">R\u00b2</td><td style="text-align:right">Pts</td><td style="text-align:right">Verdict</td></tr>';
+for(var ti=0;ti<zr.length;ti++){var z2=zr[ti],sn2=z2.name.replace(/___.*/, '').replace(/_/g,' '),v,vc;
+if(z2.n<5){v='Low data';vc=fg;}else if(z2.r2<0.1){v='Weak fit';vc=fg;}else if(maxSlope>0&&z2.slope>maxSlope*0.8&&zr.length>1){v='Highest loss';vc='var(--dg,#e53e3e)';}else if(maxSlope>0&&z2.slope<maxSlope*0.5){v='Better insulated';vc='var(--ok,#38a169)';}else{v='Moderate';vc='var(--wn,#dd6b20)';}
+th+='<tr><td>'+sn2+'</td><td style="text-align:right;font-weight:600">'+z2.slope+'</td><td style="text-align:right">'+z2.r2+'</td><td style="text-align:right">'+z2.n+'</td><td style="text-align:right;color:'+vc+'">'+v+'</td></tr>';}
+th+='</table>';
+var el=document.getElementById('energySigPanel');
+if(!el){var ref=document.getElementById('durationCurvePanel')||document.getElementById('stackPanel')||document.getElementById('analysisGrid');if(!ref)return;el=document.createElement('div');el.id='energySigPanel';ref.parentNode.insertBefore(el,ref.nextSibling);}
+el.innerHTML='<div class="card" style="margin-bottom:12px"><h2 class="card-title">ENERGY SIGNATURE</h2>'+s+th+'<details style="margin-top:6px;font-size:0.72em;opacity:0.6"><summary style="cursor:pointer">\u2139\ufe0f About</summary><p style="margin:3px 0">Plots how fast each room cools vs indoor\u2013outdoor temperature difference. Steeper slope = worse envelope. If the line flattens at high \u0394T, the system has reached capacity.</p></details></div>';
+}catch(e){console.warn('[ESIG]',e);}
+}
+setTimeout(build,6000);setInterval(build,300000);
+var ag=document.getElementById('analysisGrid');if(ag)new MutationObserver(function(){setTimeout(build,600);}).observe(ag,{childList:true});
+})();
+
+// === PSYCHROMETRIC CHART — Phase Space (Category 3) ===
+(function(){
+if(window._psychroInit)return;window._psychroInit=true;
+var ZC=['#e53e3e','#dd6b20','#38a169','#4299e1'];
+var CZ=[{t:67,rh:20},{t:67,rh:60},{t:76,rh:60},{t:78,rh:40},{t:78,rh:20},{t:67,rh:20}];
+function cv(n){return getComputedStyle(document.documentElement).getPropertyValue(n).trim();}
+function inCZ(t,rh){var inside=false;for(var i=0,j=CZ.length-2;i<CZ.length-1;j=i++){var xi=CZ[i].t,yi=CZ[i].rh,xj=CZ[j].t,yj=CZ[j].rh;if(((yi>rh)!==(yj>rh))&&(t<(xj-xi)*(rh-yi)/(yj-yi)+xi))inside=!inside;}return inside;}
+function build(){
+try{
+var data=typeof window._hvacData==='function'?window._hvacData():null;
+if(!data||!data.zones)return;
+var zd=[],hasH=false;
+for(var zi=0;zi<data.zones.length;zi++){
+var zone=data.zones[zi];if(!zone.readings)continue;
+var pts=[],inZ=0,tot=0;
+for(var ri=0;ri<zone.readings.length;ri++){
+var r=zone.readings[ri];if(r.temp==null||r.humidity==null||isNaN(r.humidity))continue;
+hasH=true;tot++;var ic=inCZ(r.temp,r.humidity);if(ic)inZ++;
+pts.push({t:r.temp,rh:r.humidity,ic:ic});
+}
+if(pts.length>0)zd.push({name:zone.name,pts:pts,outPct:tot>0?Math.round((tot-inZ)/tot*1000)/10:0,color:ZC[zi%4],tot:tot});
+}
+var el=document.getElementById('psychroPanel');
+if(!hasH||zd.length===0){
+if(!el){var ref0=document.getElementById('energySigPanel')||document.getElementById('durationCurvePanel')||document.getElementById('analysisGrid');if(!ref0)return;el=document.createElement('div');el.id='psychroPanel';ref0.parentNode.insertBefore(el,ref0.nextSibling);}
+el.innerHTML='<div class="card" style="margin-bottom:12px"><h2 class="card-title">PSYCHROMETRIC CHART</h2><div style="padding:16px;text-align:center;opacity:0.5;font-size:0.9em">\u23f3 Waiting for humidity data</div></div>';return;
+}
+window._psychroStats=zd;
+var W=580,H=360,p={t:30,r:105,b:45,l:50},pw=W-p.l-p.r,ph=H-p.t-p.b;
+var tMin=55,tMax=85,rhMin=0,rhMax=80;
+function xs(v){return p.l+((v-tMin)/(tMax-tMin))*pw;}
+function ys(v){return p.t+(1-(v-rhMin)/(rhMax-rhMin))*ph;}
+var fg=cv('--fg')||'#ccc',gc=cv('--grid')||'rgba(255,255,255,0.08)',bg=cv('--card-bg')||'#1a1a2e';
+var s='<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;max-width:600px;font-family:inherit">';
+s+='<rect width="'+W+'" height="'+H+'" fill="'+bg+'" rx="8"/>';
+for(var grh=0;grh<=rhMax;grh+=10){var gy=ys(grh);s+='<line x1="'+p.l+'" y1="'+gy+'" x2="'+(W-p.r)+'" y2="'+gy+'" stroke="'+gc+'" stroke-width="0.5"/>';s+='<text x="'+(p.l-6)+'" y="'+(gy+4)+'" text-anchor="end" fill="'+fg+'" font-size="9" opacity="0.6">'+grh+'%</text>';}
+for(var gt=tMin;gt<=tMax;gt+=5){var gx=xs(gt);s+='<line x1="'+gx+'" y1="'+p.t+'" x2="'+gx+'" y2="'+(H-p.b)+'" stroke="'+gc+'" stroke-width="0.5"/>';s+='<text x="'+gx+'" y="'+(H-p.b+14)+'" text-anchor="middle" fill="'+fg+'" font-size="9" opacity="0.6">'+gt+'\u00b0</text>';}
+s+='<text x="'+(p.l+pw/2)+'" y="'+(H-4)+'" text-anchor="middle" fill="'+fg+'" font-size="10" opacity="0.7">Temperature (\u00b0F)</text>';
+s+='<text x="12" y="'+(p.t+ph/2)+'" text-anchor="middle" fill="'+fg+'" font-size="10" opacity="0.7" transform="rotate(-90,12,'+(p.t+ph/2)+')">Relative Humidity (%)</text>';
+var cp='';for(var ci=0;ci<CZ.length;ci++)cp+=(ci===0?'M':'L')+xs(CZ[ci].t).toFixed(1)+','+ys(CZ[ci].rh).toFixed(1);
+s+='<path d="'+cp+'" fill="rgba(72,187,120,0.12)" stroke="#48bb78" stroke-width="1.5" stroke-dasharray="4,3"/>';
+s+='<text x="'+xs(72)+'" y="'+(ys(42))+'" fill="#48bb78" font-size="9" text-anchor="middle" opacity="0.7">ASHRAE 55</text>';
+for(var zdi=0;zdi<zd.length;zdi++){var z=zd[zdi];for(var pi=0;pi<z.pts.length;pi++){var px=xs(z.pts[pi].t),py=ys(z.pts[pi].rh);if(px>=p.l&&px<=W-p.r&&py>=p.t&&py<=H-p.b)s+='<circle cx="'+px.toFixed(1)+'" cy="'+py.toFixed(1)+'" r="3" fill="'+z.color+'" opacity="'+(z.pts[pi].ic?'0.35':'0.7')+'"/>';}}
+var ly=p.t+6;for(var li=0;li<zd.length;li++){var sn=zd[li].name.replace(/___.*/, '').replace(/_/g,' ');s+='<rect x="'+(W-p.r+4)+'" y="'+ly+'" width="8" height="8" fill="'+zd[li].color+'" rx="1"/>';s+='<text x="'+(W-p.r+16)+'" y="'+(ly+8)+'" fill="'+fg+'" font-size="8">'+sn+'</text>';ly+=12;s+='<text x="'+(W-p.r+16)+'" y="'+(ly+4)+'" fill="'+fg+'" font-size="7" opacity="0.5">'+zd[li].outPct+'% outside</text>';ly+=14;}
+s+='<text x="'+(p.l+pw/2)+'" y="16" text-anchor="middle" fill="'+fg+'" font-size="12" font-weight="600">Psychrometric \u2014 Comfort Zone</text>';
+s+='</svg>';
+var sh='<div style="margin-top:6px;font-size:0.82em">';
+for(var si=0;si<zd.length;si++){var z3=zd[si],sn3=z3.name.replace(/___.*/, '').replace(/_/g,' '),pc=z3.outPct>50?'var(--dg,#e53e3e)':z3.outPct>20?'var(--wn,#dd6b20)':'var(--ok,#38a169)';sh+='<div style="display:flex;justify-content:space-between;padding:2px 0"><span>'+sn3+'</span><span style="color:'+pc+';font-weight:600">'+z3.outPct+'% outside comfort ('+z3.tot+' pts)</span></div>';}
+sh+='</div>';
+if(!el){var ref=document.getElementById('energySigPanel')||document.getElementById('durationCurvePanel')||document.getElementById('analysisGrid');if(!ref)return;el=document.createElement('div');el.id='psychroPanel';ref.parentNode.insertBefore(el,ref.nextSibling);}
+el.innerHTML='<div class="card" style="margin-bottom:12px"><h2 class="card-title">PSYCHROMETRIC CHART</h2>'+s+sh+'<details style="margin-top:6px;font-size:0.72em;opacity:0.6"><summary style="cursor:pointer">\u2139\ufe0f About</summary><p style="margin:3px 0">Plots temperature vs humidity. Green polygon = ASHRAE 55 comfort zone. Points outside = conditions failing habitability standards for temp, humidity, or both.</p></details></div>';
+}catch(e){console.warn('[PSYCHRO]',e);}
+}
+setTimeout(build,7000);setInterval(build,300000);
+var ag=document.getElementById('analysisGrid');if(ag)new MutationObserver(function(){setTimeout(build,700);}).observe(ag,{childList:true});
+})();

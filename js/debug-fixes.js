@@ -966,3 +966,219 @@ window._exportSidsLog = function() {
     setTimeout(computeFOPDT, 200);
   }).observe(ag, { childList: true });
 })();
+
+// === PERFORMANCE RATIO — Japanese SHASE Method ===
+// Compares heating rate when ONE zone is active vs ALL zones active.
+// PR = P_multi / P_single
+//
+// PR ≈ 1.0 but performance still poor → damper fault (equipment has
+//   capacity, delivery is broken)
+// PR ≪ 1.0 (e.g. 0.5) → outdoor unit capacity shortage (equipment
+//   can't serve all zones simultaneously)
+//
+// This is the "equipment broken vs equipment undersized" distinction.
+
+(function() {
+  if (window._prInit) return;
+  window._prInit = true;
+  window._prResults = null;
+
+  function computePR() {
+    try {
+      if (!lastData || !lastData.diagnostics) return;
+
+      var zones = lastData.zones;
+      var diagResults = lastData.diagnostics.zoneResults;
+      if (!diagResults || diagResults.length < 2) return;
+
+      // Build a timeline of which zones are "on" at each 5-min bucket
+      // A zone is "on" if it's in a heating segment at that time
+      var allBuckets = new Map(); // bucketKey → { zonesOn: Set, rates: { zoneId: rate } }
+
+      for (var zi = 0; zi < zones.length; zi++) {
+        var zone = zones[zi];
+        var diag = diagResults.find(function(d) { return d.zoneId === zone.id; });
+        if (!diag || !diag.segments) continue;
+
+        var ts = zone.timeSeries;
+        if (!ts || ts.length < 6) continue;
+
+        for (var si = 0; si < diag.segments.length; si++) {
+          var seg = diag.segments[si];
+          if (!seg.on) continue;
+          var durMin = (seg.endTs - seg.startTs) / 60000;
+          if (durMin < 10) continue;
+
+          // Heating rate for this segment (°F/hr)
+          var rate = (seg.endTemp - seg.startTemp) / (durMin / 60);
+          if (rate < 0.1) continue; // not meaningfully heating
+
+          // Mark each 5-min bucket in this segment
+          var startBucket = Math.floor(seg.startTs.getTime() / 300000);
+          var endBucket = Math.floor(seg.endTs.getTime() / 300000);
+          for (var b = startBucket; b <= endBucket; b++) {
+            if (!allBuckets.has(b)) allBuckets.set(b, { zonesOn: new Set(), rates: {} });
+            var bucket = allBuckets.get(b);
+            bucket.zonesOn.add(zone.id);
+            bucket.rates[zone.id] = rate;
+          }
+        }
+      }
+
+      // Classify buckets: single-zone vs multi-zone
+      var singleRates = {}; // zoneId → [rates]
+      var multiRates = {};  // zoneId → [rates]
+
+      allBuckets.forEach(function(bucket) {
+        var count = bucket.zonesOn.size;
+        bucket.zonesOn.forEach(function(zid) {
+          if (count === 1) {
+            if (!singleRates[zid]) singleRates[zid] = [];
+            singleRates[zid].push(bucket.rates[zid]);
+          } else {
+            if (!multiRates[zid]) multiRates[zid] = [];
+            multiRates[zid].push(bucket.rates[zid]);
+          }
+        });
+      });
+
+      // Compute PR per zone
+      var results = [];
+      for (var zi2 = 0; zi2 < zones.length; zi2++) {
+        var zid = zones[zi2].id;
+        var sRates = singleRates[zid];
+        var mRates = multiRates[zid];
+
+        if ((!sRates || sRates.length < 2) && (!mRates || mRates.length < 2)) continue;
+
+        var pSingle = sRates && sRates.length >= 2 ?
+          sRates.reduce(function(a,b){return a+b;},0) / sRates.length : null;
+        var pMulti = mRates && mRates.length >= 2 ?
+          mRates.reduce(function(a,b){return a+b;},0) / mRates.length : null;
+
+        var pr = (pSingle && pMulti && pSingle > 0.1) ? pMulti / pSingle : null;
+
+        results.push({
+          zone: zones[zi2].name,
+          zoneId: zid,
+          pSingle: pSingle ? Math.round(pSingle * 100) / 100 : null,
+          pMulti: pMulti ? Math.round(pMulti * 100) / 100 : null,
+          pr: pr ? Math.round(pr * 100) / 100 : null,
+          singleBuckets: sRates ? sRates.length : 0,
+          multiBuckets: mRates ? mRates.length : 0
+        });
+      }
+
+      window._prResults = results.length > 0 ? results : null;
+
+      if (results.length > 0) {
+        console.log('[PR] Performance Ratio:', results.map(function(r) {
+          return r.zone + ': single=' + (r.pSingle||'?') + ' multi=' + (r.pMulti||'?') + ' PR=' + (r.pr||'?');
+        }).join(', '));
+        renderPR();
+      } else {
+        console.log('[PR] Not enough single/multi zone heating data yet');
+      }
+    } catch (e) { console.warn('[PR] compute error:', e); }
+  }
+
+  function renderPR() {
+    try {
+      if (!window._prResults) return;
+      var panel = document.getElementById('prPanel');
+      if (!panel) {
+        // Insert after FOPDT panel, or after extras panel
+        var ref = document.getElementById('fopdtPanel') || document.getElementById('extrasPanel');
+        if (!ref) return;
+        panel = document.createElement('div');
+        panel.id = 'prPanel';
+        ref.parentNode.insertBefore(panel, ref.nextSibling);
+      }
+
+      var results = window._prResults;
+      var html = '<div class="card" style="margin-bottom:12px"><h2 class="card-title">PERFORMANCE RATIO</h2>';
+
+      html += '<table style="width:100%;border-collapse:collapse;font-size:0.9em">';
+      html += '<tr style="opacity:0.6;font-size:0.8em">' +
+        '<td>Zone</td>' +
+        '<td style="text-align:right">Alone (\u00b0F/hr)</td>' +
+        '<td style="text-align:right">Shared (\u00b0F/hr)</td>' +
+        '<td style="text-align:right">Ratio</td>' +
+        '<td style="text-align:right">Verdict</td></tr>';
+
+      for (var i = 0; i < results.length; i++) {
+        var r = results[i];
+        var verdict = '', color = '';
+
+        if (r.pr != null) {
+          if (r.pr >= 0.85) {
+            verdict = 'Delivery fault';
+            color = 'var(--wn)';
+          } else if (r.pr >= 0.6) {
+            verdict = 'Moderate contention';
+            color = 'var(--wn)';
+          } else {
+            verdict = 'Undersized';
+            color = 'var(--dg)';
+          }
+          // Special case: PR near 1 and rates are good = system OK for this zone
+          if (r.pr >= 0.85 && r.pMulti && r.pMulti > 1.0) {
+            verdict = 'OK';
+            color = 'var(--ok)';
+          }
+        } else {
+          verdict = 'Insufficient data';
+          color = 'var(--tm)';
+        }
+
+        html += '<tr>' +
+          '<td>' + r.zone + '</td>' +
+          '<td style="text-align:right">' + (r.pSingle != null ? r.pSingle.toFixed(1) : '\u2014') + '</td>' +
+          '<td style="text-align:right">' + (r.pMulti != null ? r.pMulti.toFixed(1) : '\u2014') + '</td>' +
+          '<td style="text-align:right;font-weight:600">' + (r.pr != null ? r.pr.toFixed(2) : '\u2014') + '</td>' +
+          '<td style="text-align:right;font-weight:600;color:' + color + '">' + verdict + '</td></tr>';
+      }
+      html += '</table>';
+
+      // System-wide summary
+      var prs = results.filter(function(r) { return r.pr != null; }).map(function(r) { return r.pr; });
+      if (prs.length >= 2) {
+        var avgPR = prs.reduce(function(a,b){return a+b;},0) / prs.length;
+        var sysVerdict, sysColor;
+        if (avgPR < 0.6) {
+          sysVerdict = 'Equipment likely undersized \u2014 can\u2019t serve all zones simultaneously';
+          sysColor = 'var(--dg)';
+        } else if (avgPR >= 0.85) {
+          sysVerdict = 'Equipment has capacity \u2014 delivery/damper issue more likely';
+          sysColor = 'var(--wn)';
+        } else {
+          sysVerdict = 'Moderate capacity contention across zones';
+          sysColor = 'var(--wn)';
+        }
+        html += '<div style="margin-top:8px;padding:6px;background:var(--sd);border-radius:4px;font-size:0.85em">' +
+          '<strong>System:</strong> avg PR = ' + avgPR.toFixed(2) + ' \u2014 ' +
+          '<span style="color:' + sysColor + '">' + sysVerdict + '</span></div>';
+      }
+
+      html += '<details style="margin-top:8px;font-size:0.75em;opacity:0.6"><summary style="cursor:pointer">\u2139\ufe0f What is Performance Ratio?</summary>' +
+        '<p style="margin:4px 0"><b>Alone</b>: Heating rate when only this zone\u2019s HVAC is running.</p>' +
+        '<p style="margin:4px 0"><b>Shared</b>: Heating rate when multiple zones run simultaneously.</p>' +
+        '<p style="margin:4px 0"><b>Ratio</b> = Shared \u00f7 Alone. Tells you why performance is poor:</p>' +
+        '<p style="margin:4px 0">PR \u2248 1.0 but still slow \u2192 the equipment has capacity, but delivery (dampers/ductwork) is broken.</p>' +
+        '<p style="margin:4px 0">PR \u226a 1.0 (e.g. 0.5) \u2192 the outdoor unit can\u2019t serve all zones at once. Equipment is undersized.</p>' +
+        '<p style="margin:4px 0">This is the difference between telling your landlord "it\u2019s broken" vs "it\u2019s too small."</p>' +
+        '</details>';
+
+      html += '</div>';
+      panel.innerHTML = html;
+    } catch (e) { console.warn('[PR] render error:', e); }
+  }
+
+  computePR();
+  setInterval(computePR, 300000);
+
+  var ag = document.getElementById('analysisGrid');
+  if (ag) new MutationObserver(function() {
+    setTimeout(computePR, 300);
+  }).observe(ag, { childList: true });
+})();

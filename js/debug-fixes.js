@@ -32,9 +32,9 @@ renderFloorPlan = function(zones) {
     temp.style.fontFamily = cssVar('--ff');
     temp.textContent = z.avgTemp != null ? z.avgTemp.toFixed(1) + '\u00b0' : 'No data';
     svg.appendChild(temp);
-    if (z.online && z.humidity != null) {
+    if (z.online && z.hum != null) {
       var hum = svgEl('text', { x: s.cx, y: s.y + 92, 'text-anchor': 'middle', fill: tm, 'font-size': '11' });
-      hum.textContent = z.humidity.toFixed(0) + '% RH';
+      hum.textContent = z.hum.toFixed(0) + '% RH';
       svg.appendChild(hum);
     }
     if (z.online && z.rate && z.rate.dir !== 'stable') {
@@ -318,7 +318,7 @@ setInterval(function() {
     // === LOG WARNING/DANGER ===
     if (tier && tier !== 'INFO') {
       var lastLog = window._sidsLog[window._sidsLog.length - 1];
-      var shouldLog = !lastLog || lastLog.tier !== tier || (now - new Date(lastLog.timestamp).getTime()) > 600000;
+      var shouldLog = !lastLog || lastLog.tier !== tier || (now - new Date(lastLog.ts).getTime()) > 600000;
       if (shouldLog) {
         window._sidsLog.push({
           timestamp: new Date().toISOString(),
@@ -472,8 +472,8 @@ window._exportSidsLog = function() {
     try {
       if (!lastData) return;
       var outdoorAH = null;
-      if (lastData.weather && lastData.weather.tempF != null && lastData.weather.humidity != null) {
-        outdoorAH = absHumidity(lastData.weather.tempF, lastData.weather.humidity);
+      if (lastData.weather && lastData.weather.tempF != null && lastData.weather.hum != null) {
+        outdoorAH = absHumidity(lastData.weather.tempF, lastData.weather.hum);
       }
       if (outdoorAH == null) return;
 
@@ -1471,12 +1471,12 @@ window._exportSidsLog = function() {
 
       for (var zi = 0; zi < data.zones.length; zi++) {
         var zone = data.zones[zi];
-        if (!zone.readings || zone.readings.length < 3) continue;
+        if (!zone.timeSeries || zone.timeSeries.length < 3) continue;
 
         // Extract and sort temperatures descending
         var temps = [];
-        for (var ri = 0; ri < zone.readings.length; ri++) {
-          var t = zone.readings[ri].temp;
+        for (var ri = 0; ri < zone.timeSeries.length; ri++) {
+          var t = zone.timeSeries[ri].temp;
           if (t != null && !isNaN(t)) temps.push(t);
         }
         if (temps.length < 3) continue;
@@ -1667,12 +1667,12 @@ var data=typeof window._hvacData==='function'?window._hvacData():null;
 if(!data||!data.zones||!data.weather||data.weather.tempF==null)return;
 var zr=[],allDT=[],allR=[];
 for(var zi=0;zi<data.zones.length;zi++){
-var zone=data.zones[zi];if(!zone.readings||zone.readings.length<6)continue;
+var zone=data.zones[zi];if(!zone.timeSeries||zone.timeSeries.length<6)continue;
 var pts=[];
-for(var i=1;i<zone.readings.length;i++){
-var t0=zone.readings[i-1],t1=zone.readings[i];
+for(var i=1;i<zone.timeSeries.length;i++){
+var t0=zone.timeSeries[i-1],t1=zone.timeSeries[i];
 if(t0.temp==null||t1.temp==null)continue;
-var dt=(new Date(t1.timestamp||t1.ts).getTime()-new Date(t0.timestamp||t0.ts).getTime())/3600000;
+var dt=(new Date(t1.ts||t1.ts).getTime()-new Date(t0.ts||t0.ts).getTime())/3600000;
 if(dt<0.05||dt>0.75)continue;
 var rate=(t1.temp-t0.temp)/dt;
 if(rate>=-0.1)continue;
@@ -1743,12 +1743,12 @@ var data=typeof window._hvacData==='function'?window._hvacData():null;
 if(!data||!data.zones)return;
 var zd=[],hasH=false;
 for(var zi=0;zi<data.zones.length;zi++){
-var zone=data.zones[zi];if(!zone.readings)continue;
+var zone=data.zones[zi];if(!zone.timeSeries)continue;
 var pts=[],inZ=0,tot=0;
-for(var ri=0;ri<zone.readings.length;ri++){
-var r=zone.readings[ri];if(r.temp==null||r.humidity==null||isNaN(r.humidity))continue;
-hasH=true;tot++;var ic=inCZ(r.temp,r.humidity);if(ic)inZ++;
-pts.push({t:r.temp,rh:r.humidity,ic:ic});
+for(var ri=0;ri<zone.timeSeries.length;ri++){
+var r=zone.timeSeries[ri];if(r.temp==null||r.hum==null||isNaN(r.hum))continue;
+hasH=true;tot++;var ic=inCZ(r.temp,r.hum);if(ic)inZ++;
+pts.push({t:r.temp,rh:r.hum,ic:ic});
 }
 if(pts.length>0)zd.push({name:zone.name,pts:pts,outPct:tot>0?Math.round((tot-inZ)/tot*1000)/10:0,color:ZC[zi%4],tot:tot});
 }

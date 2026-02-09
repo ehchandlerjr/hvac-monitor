@@ -166,7 +166,7 @@ def main():
         try:
             items = get_device_history(device_id, location_id)
             readings = history_to_readings(items, since)
-            sensor_id = device_label.lower().replace("2018","'").replace("2019","'").replace("201c","'").replace("201d","'").replace(" ","_").replace("-","_")
+            sensor_id = device_label.lower().replace("‘","'").replace("’","'").replace("“","'").replace("”","'").replace(" ","_").replace("-","_")
             for reading in readings:
                 all_rows.append({"timestamp":reading["timestamp"],"sensor_id":sensor_id,"device_id":device_id,
                     "temp_f":reading.get("temp_f"),"humidity_pct":reading.get("humidity_pct"),

@@ -1786,3 +1786,34 @@ el.innerHTML='<div class="card" style="margin-bottom:12px"><h2 class="card-title
 setTimeout(build,7000);setInterval(build,300000);
 var ag=document.getElementById('analysisGrid');if(ag)new MutationObserver(function(){setTimeout(build,700);}).observe(ag,{childList:true});
 })();
+
+// === TEMP DEBUG ===
+(function(){
+setTimeout(function(){
+var d=document.createElement('div');
+d.id='dbgOut';
+d.style.cssText='position:fixed;bottom:0;left:0;right:0;background:#000;color:#0f0;font:11px monospace;padding:8px;max-height:40vh;overflow:auto;z-index:9999';
+document.body.appendChild(d);
+try{
+var data=typeof window._hvacData==='function'?window._hvacData():null;
+if(!data){d.textContent='DATA: null';return;}
+var keys=Object.keys(data);
+var out='keys:'+keys.join(',')+'\n';
+if(data.zones){
+out+='zones:'+data.zones.length+'\n';
+for(var i=0;i<data.zones.length;i++){
+var z=data.zones[i];
+var rk=z.readings&&z.readings.length>0?Object.keys(z.readings[0]).join(','):'no readings';
+out+=z.name+' r:'+((z.readings||[]).length)+' keys:['+rk+']\n';
+var r0=z.readings&&z.readings[0]?JSON.stringify(z.readings[0]).substring(0,120):'';
+out+='  sample:'+r0+'\n';
+}}
+if(data.weather)out+='weather:'+JSON.stringify(data.weather).substring(0,100)+'\n';
+out+='durationPanel:'+!!document.getElementById('durationCurvePanel')+'\n';
+out+='energySigPanel:'+!!document.getElementById('energySigPanel')+'\n';
+out+='psychroPanel:'+!!document.getElementById('psychroPanel')+'\n';
+out+='analysisGrid:'+!!document.getElementById('analysisGrid')+'\n';
+d.textContent=out;
+}catch(e){d.textContent='ERR:'+e.message;}
+},8000);
+})();

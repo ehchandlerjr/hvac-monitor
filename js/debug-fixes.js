@@ -1182,3 +1182,246 @@ window._exportSidsLog = function() {
     setTimeout(computePR, 300);
   }).observe(ag, { childList: true });
 })();
+
+// === f-FACTOR — Dutch Thermal Bridge Detection ===
+// f = (T_wall_est - T_out) / (T_in - T_out)
+// Where T_wall ≈ T_in - 4°F (forced air estimate from v1 diagnostics)
+//
+// f > 0.7 = good insulation
+// f 0.5-0.7 = moderate thermal bridging
+// f < 0.5 = severe thermal bridging / insulation failure
+//
+// Low f-factor at specific zones = localized envelope problem
+
+(function() {
+  if (window._ffInit) return;
+  window._ffInit = true;
+  window._ffResults = null;
+
+  function computeFF() {
+    try {
+      if (!lastData || !lastData.weather || lastData.weather.tempF == null) return;
+      var Tout = lastData.weather.tempF;
+      var results = [];
+
+      for (var i = 0; i < lastData.zones.length; i++) {
+        var zone = lastData.zones[i];
+        if (zone.avgTemp == null) continue;
+        var Tin = zone.avgTemp;
+        var deltaT = Tin - Tout;
+        if (Math.abs(deltaT) < 5) continue; // need meaningful indoor-outdoor difference
+
+        // Estimate wall surface temp: T_wall ≈ T_in - 4°F for forced air
+        // This is the same estimate used in bundle-1.js dew point margin
+        var Twall = Tin - 4;
+        var f = (Twall - Tout) / deltaT;
+        f = Math.round(f * 1000) / 1000;
+
+        var label, color;
+        if (f >= 0.7) { label = 'Good'; color = 'var(--ok)'; }
+        else if (f >= 0.5) { label = 'Moderate bridging'; color = 'var(--wn)'; }
+        else { label = 'Severe bridging'; color = 'var(--dg)'; }
+
+        results.push({ zone: zone.name, f: f, Twall: Math.round(Twall*10)/10, label: label, color: color });
+      }
+
+      window._ffResults = results.length > 0 ? results : null;
+      if (results.length > 0) renderFF();
+    } catch (e) { console.warn('[f-factor] compute error:', e); }
+  }
+
+  function renderFF() {
+    try {
+      if (!window._ffResults) return;
+      var panel = document.getElementById('ffPanel');
+      if (!panel) {
+        var ref = document.getElementById('prPanel') || document.getElementById('fopdtPanel') || document.getElementById('extrasPanel');
+        if (!ref) return;
+        panel = document.createElement('div');
+        panel.id = 'ffPanel';
+        ref.parentNode.insertBefore(panel, ref.nextSibling);
+      }
+
+      var results = window._ffResults;
+      var html = '<div class="card" style="margin-bottom:12px"><h2 class="card-title">ENVELOPE f-FACTOR</h2>';
+      html += '<table style="width:100%;border-collapse:collapse;font-size:0.9em">';
+      html += '<tr style="opacity:0.6;font-size:0.8em"><td>Zone</td>' +
+        '<td style="text-align:right">Wall est.</td>' +
+        '<td style="text-align:right">f-factor</td>' +
+        '<td style="text-align:right">Rating</td></tr>';
+
+      for (var i = 0; i < results.length; i++) {
+        var r = results[i];
+        html += '<tr><td>' + r.zone + '</td>' +
+          '<td style="text-align:right">' + r.Twall.toFixed(1) + '\u00b0F</td>' +
+          '<td style="text-align:right;font-weight:600">' + r.f.toFixed(2) + '</td>' +
+          '<td style="text-align:right;color:' + r.color + '">' + r.label + '</td></tr>';
+      }
+      html += '</table>';
+
+      html += '<details style="margin-top:8px;font-size:0.75em;opacity:0.6"><summary style="cursor:pointer">\u2139\ufe0f What is f-factor?</summary>' +
+        '<p style="margin:4px 0">Ratio of wall-to-outdoor temp difference vs indoor-to-outdoor difference. ' +
+        'Measures how well the wall insulates.</p>' +
+        '<p style="margin:4px 0">f > 0.7 = well insulated. f < 0.5 = thermal bridge or insulation gap. ' +
+        'Wall temp estimated at indoor - 4\u00b0F (forced air convention).</p>' +
+        '<p style="margin:4px 0">Low f-factor in one zone but not others = localized envelope defect.</p>' +
+        '</details></div>';
+
+      panel.innerHTML = html;
+    } catch (e) { console.warn('[f-factor] render error:', e); }
+  }
+
+  computeFF();
+  setInterval(computeFF, 300000);
+  var ag = document.getElementById('analysisGrid');
+  if (ag) new MutationObserver(function() { setTimeout(computeFF, 250); }).observe(ag, { childList: true });
+})();
+
+// === STACK EFFECT — Korean/Finnish Pressure Model ===
+// ΔP = g × ρ × ΔT/T_avg × (h - h_NPL)
+// For a 3-story townhouse: ~1.7 Pa per meter per 20°C ΔT
+//
+// Predicts pressure-driven air movement: warm air rises, pushes out
+// through upper floors, pulls cold air in at ground floor.
+// Explains why Play Room (floor 1) cools faster and why upper bedrooms
+// may have exfiltration (moisture into walls).
+
+(function() {
+  if (window._stackInit) return;
+  window._stackInit = true;
+  window._stackResults = null;
+
+  // House parameters
+  var FLOOR_HEIGHT_M = 2.7; // ~9 ft typical US townhouse floor-to-floor
+  var NUM_FLOORS = 2;        // 2 floors + attic (per Edward's correction)
+  var TOTAL_HEIGHT_M = FLOOR_HEIGHT_M * NUM_FLOORS;
+  var NPL_FRACTION = 0.5;    // neutral pressure level at mid-height (no mechanical ventilation)
+  var NPL_M = TOTAL_HEIGHT_M * NPL_FRACTION;
+  var G = 9.81;
+  var RHO = 1.2; // kg/m³ air density at ~20°C
+
+  // Floor heights (meters from ground)
+  var FLOOR_HEIGHTS = {
+    play_room: 1.35,          // floor 1, mid-height
+    teddys_room: 4.05,        // floor 2, mid-height
+    eliots_room: 4.05,        // floor 2, mid-height
+    master: 4.05              // floor 2, mid-height
+  };
+
+  function computeStack() {
+    try {
+      if (!lastData || !lastData.weather || lastData.weather.tempF == null) return;
+
+      var Tout_F = lastData.weather.tempF;
+      var results = [];
+
+      for (var i = 0; i < lastData.zones.length; i++) {
+        var zone = lastData.zones[i];
+        if (zone.avgTemp == null) continue;
+        var Tin_F = zone.avgTemp;
+
+        // Convert to Kelvin for pressure calc
+        var Tin_K = (Tin_F - 32) * 5/9 + 273.15;
+        var Tout_K = (Tout_F - 32) * 5/9 + 273.15;
+        var T_avg_K = (Tin_K + Tout_K) / 2;
+        var deltaT_K = Tin_K - Tout_K;
+
+        var h = FLOOR_HEIGHTS[zone.id] || 2.7;
+
+        // ΔP at this height relative to NPL
+        var dP = G * RHO * (deltaT_K / T_avg_K) * (h - NPL_M);
+        dP = Math.round(dP * 100) / 100;
+
+        // Positive = pressure pushes air OUT (exfiltration) — upper floors in winter
+        // Negative = pressure pulls air IN (infiltration) — lower floors in winter
+        var direction, color;
+        if (dP > 1) { direction = 'Exfiltration \u2191'; color = 'var(--wn)'; }
+        else if (dP < -1) { direction = 'Infiltration \u2193'; color = 'var(--wn)'; }
+        else { direction = 'Neutral'; color = 'var(--ok)'; }
+
+        // Moisture risk: exfiltration in winter pushes humid air into wall cavities
+        var moistureRisk = (dP > 1 && deltaT_K > 10) ? true : false;
+
+        results.push({
+          zone: zone.name,
+          floor: zone.floor,
+          height: h,
+          dP: dP,
+          direction: direction,
+          color: color,
+          moistureRisk: moistureRisk
+        });
+      }
+
+      window._stackResults = results.length > 0 ? results : null;
+      if (results.length > 0) {
+        console.log('[STACK] Pressure:', results.map(function(r) {
+          return r.zone + ': ' + r.dP + ' Pa (' + r.direction + ')';
+        }).join(', '));
+        renderStack();
+      }
+    } catch (e) { console.warn('[STACK] compute error:', e); }
+  }
+
+  function renderStack() {
+    try {
+      if (!window._stackResults) return;
+      var panel = document.getElementById('stackPanel');
+      if (!panel) {
+        var ref = document.getElementById('ffPanel') || document.getElementById('prPanel') || document.getElementById('extrasPanel');
+        if (!ref) return;
+        panel = document.createElement('div');
+        panel.id = 'stackPanel';
+        ref.parentNode.insertBefore(panel, ref.nextSibling);
+      }
+
+      var results = window._stackResults;
+      var Tout = lastData.weather.tempF;
+
+      var html = '<div class="card" style="margin-bottom:12px"><h2 class="card-title">STACK EFFECT</h2>';
+      html += '<table style="width:100%;border-collapse:collapse;font-size:0.9em">';
+      html += '<tr style="opacity:0.6;font-size:0.8em"><td>Zone</td>' +
+        '<td style="text-align:right">Height</td>' +
+        '<td style="text-align:right">\u0394P (Pa)</td>' +
+        '<td style="text-align:right">Airflow</td></tr>';
+
+      for (var i = 0; i < results.length; i++) {
+        var r = results[i];
+        html += '<tr><td>' + r.zone + (r.moistureRisk ? ' \u26a0' : '') + '</td>' +
+          '<td style="text-align:right">' + r.height.toFixed(1) + 'm</td>' +
+          '<td style="text-align:right;font-weight:600;color:' + r.color + '">' +
+          (r.dP >= 0 ? '+' : '') + r.dP.toFixed(1) + '</td>' +
+          '<td style="text-align:right;color:' + r.color + '">' + r.direction + '</td></tr>';
+      }
+      html += '</table>';
+
+      // Moisture warnings
+      var moistureZones = results.filter(function(r) { return r.moistureRisk; });
+      if (moistureZones.length > 0) {
+        html += '<div style="margin-top:8px;padding:6px;background:var(--sd);border-radius:4px;font-size:0.85em">' +
+          '\u26a0\ufe0f <strong>Moisture risk:</strong> ' +
+          moistureZones.map(function(r) { return r.zone; }).join(', ') +
+          ' \u2014 positive pressure pushes humid indoor air into wall cavities. ' +
+          'Combined with cold exterior, this causes hidden condensation.</div>';
+      }
+
+      html += '<details style="margin-top:8px;font-size:0.75em;opacity:0.6"><summary style="cursor:pointer">\u2139\ufe0f What is stack effect?</summary>' +
+        '<p style="margin:4px 0">Warm air rises. In a multi-story building, this creates pressure differences: ' +
+        'upper floors push air out, lower floors pull air in.</p>' +
+        '<p style="margin:4px 0"><b>\u0394P positive</b> = air pushed outward (exfiltration). ' +
+        'In winter, this forces warm humid air into wall cavities where it condenses \u2192 hidden moisture damage.</p>' +
+        '<p style="margin:4px 0"><b>\u0394P negative</b> = cold air pulled inward (infiltration). ' +
+        'Explains why ground floor zones cool faster.</p>' +
+        '<p style="margin:4px 0">Based on outdoor temp ' + Tout.toFixed(1) + '\u00b0F, ' +
+        TOTAL_HEIGHT_M.toFixed(1) + 'm total height, NPL at mid-height. ' +
+        '~1.7 Pa/m per 20\u00b0C \u0394T (Finnish formulation).</p></details></div>';
+
+      panel.innerHTML = html;
+    } catch (e) { console.warn('[STACK] render error:', e); }
+  }
+
+  computeStack();
+  setInterval(computeStack, 300000);
+  var ag = document.getElementById('analysisGrid');
+  if (ag) new MutationObserver(function() { setTimeout(computeStack, 350); }).observe(ag, { childList: true });
+})();

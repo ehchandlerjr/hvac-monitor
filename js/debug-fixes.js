@@ -1787,3 +1787,210 @@ setTimeout(build,7000);setInterval(build,300000);
 var ag=document.getElementById('analysisGrid');if(ag)new MutationObserver(function(){setTimeout(build,700);}).observe(ag,{childList:true});
 })();
 
+
+
+// === FFT SPECTRAL ANALYSIS — Projection Transform (Category 2) ===
+// Decomposes temperature signal into frequency components.
+// Peaks at specific frequencies = cycling faults, scheduling errors.
+// Mode A only — no Mode B extraction possible.
+(function(){
+if(window._fftInit)return;window._fftInit=true;
+var ZC=['#e53e3e','#dd6b20','#38a169','#4299e1'];
+function cv(n){return getComputedStyle(document.documentElement).getPropertyValue(n).trim();}
+
+// Simple DFT (data sets are small enough, ~100-400 points)
+function dft(signal){
+var N=signal.length,result=[];
+var nyquist=Math.floor(N/2);
+for(var k=1;k<=nyquist;k++){
+var re=0,im=0;
+for(var n=0;n<N;n++){
+var angle=2*Math.PI*k*n/N;
+re+=signal[n]*Math.cos(angle);
+im-=signal[n]*Math.sin(angle);
+}
+result.push({bin:k,mag:Math.sqrt(re*re+im*im)/N,freq:k});
+}
+return result;
+}
+
+function build(){
+try{
+var data=typeof window._hvacData==='function'?window._hvacData():null;
+if(!data||!data.zones)return;
+
+var zoneResults=[];
+var globalMaxMag=0;
+
+for(var zi=0;zi<data.zones.length;zi++){
+var zone=data.zones[zi];
+var ts=zone.timeSeries;
+if(!ts||ts.length<16)continue;
+
+// Extract evenly-ish spaced temp values, detrend by subtracting mean
+var temps=[],sum=0;
+for(var i=0;i<ts.length;i++){
+if(ts[i].temp==null)continue;
+temps.push(ts[i].temp);
+sum+=ts[i].temp;
+}
+if(temps.length<16)continue;
+var mean=sum/temps.length;
+var detrended=[];
+for(var j=0;j<temps.length;j++)detrended.push(temps[j]-mean);
+
+// Estimate sampling interval from first and last timestamp
+var t0=new Date(ts[0].ts).getTime();
+var tN=new Date(ts[ts.length-1].ts).getTime();
+var totalHours=(tN-t0)/3600000;
+var samplesPerHour=temps.length/totalHours;
+
+// DFT
+var spectrum=dft(detrended);
+
+// Convert bin to cycles/hour
+for(var s=0;s<spectrum.length;s++){
+spectrum[s].cph=spectrum[s].bin*samplesPerHour/temps.length;
+spectrum[s].periodHr=spectrum[s].cph>0?1/spectrum[s].cph:Infinity;
+if(spectrum[s].mag>globalMaxMag)globalMaxMag=spectrum[s].mag;
+}
+
+// Find top 3 peaks
+var sorted=spectrum.slice().sort(function(a,b){return b.mag-a.mag;});
+var peaks=sorted.slice(0,3);
+
+zoneResults.push({
+name:zone.name,
+spectrum:spectrum,
+peaks:peaks,
+color:ZC[zi%4],
+nSamples:temps.length,
+totalHours:Math.round(totalHours*10)/10,
+samplesPerHour:Math.round(samplesPerHour*10)/10
+});
+}
+
+if(zoneResults.length===0)return;
+
+// Frequency axis: 0 to max meaningful frequency (cap at 6 cycles/hr = 10min period)
+var maxFreq=0;
+for(var zri=0;zri<zoneResults.length;zri++){
+var sp=zoneResults[zri].spectrum;
+for(var si=0;si<sp.length;si++){
+if(sp[si].cph<=6&&sp[si].cph>maxFreq)maxFreq=sp[si].cph;
+}
+}
+if(maxFreq<1)maxFreq=1;
+if(globalMaxMag<0.1)globalMaxMag=0.1;
+
+var W=580,H=300,p={t:30,r:105,b:50,l:55},pw=W-p.l-p.r,ph=H-p.t-p.b;
+function xs(f){return p.l+(f/maxFreq)*pw;}
+function ys(m){return p.t+(1-m/globalMaxMag)*ph;}
+
+var fg=cv('--fg')||'#ccc',gc=cv('--grid')||'rgba(255,255,255,0.08)',bg=cv('--card-bg')||'#1a1a2e';
+var svg='<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;max-width:600px;font-family:inherit">';
+svg+='<rect width="'+W+'" height="'+H+'" fill="'+bg+'" rx="8"/>';
+
+// Grid Y
+for(var gy=0;gy<=4;gy++){var yv=globalMaxMag*gy/4;var yy=ys(yv);svg+='<line x1="'+p.l+'" y1="'+yy+'" x2="'+(W-p.r)+'" y2="'+yy+'" stroke="'+gc+'" stroke-width="0.5"/>';svg+='<text x="'+(p.l-6)+'" y="'+(yy+4)+'" text-anchor="end" fill="'+fg+'" font-size="9" opacity="0.6">'+yv.toFixed(1)+'</text>';}
+
+// Grid X — frequency markers with period annotations
+var freqMarkers=[{f:0.042,label:'24h'},{f:0.083,label:'12h'},{f:0.167,label:'6h'},{f:0.5,label:'2h'},{f:1,label:'1h'},{f:2,label:'30m'},{f:4,label:'15m'}];
+for(var fm=0;fm<freqMarkers.length;fm++){
+var mk=freqMarkers[fm];
+if(mk.f>maxFreq)continue;
+var mx=xs(mk.f);
+svg+='<line x1="'+mx+'" y1="'+p.t+'" x2="'+mx+'" y2="'+(H-p.b)+'" stroke="'+gc+'" stroke-width="0.5" stroke-dasharray="2,3"/>';
+svg+='<text x="'+mx+'" y="'+(H-p.b+14)+'" text-anchor="middle" fill="'+fg+'" font-size="8" opacity="0.5">'+mk.label+'</text>';
+svg+='<text x="'+mx+'" y="'+(H-p.b+24)+'" text-anchor="middle" fill="'+fg+'" font-size="7" opacity="0.35">'+mk.f.toFixed(2)+'</text>';
+}
+
+svg+='<text x="'+(p.l+pw/2)+'" y="'+(H-2)+'" text-anchor="middle" fill="'+fg+'" font-size="10" opacity="0.7">Frequency (cycles/hr) \u2014 Period</text>';
+svg+='<text x="13" y="'+(p.t+ph/2)+'" text-anchor="middle" fill="'+fg+'" font-size="10" opacity="0.7" transform="rotate(-90,13,'+(p.t+ph/2)+')">Amplitude (\u00b0F)</text>';
+
+// Plot spectra
+for(var zpi=0;zpi<zoneResults.length;zpi++){
+var zr=zoneResults[zpi];
+var path='';
+for(var si2=0;si2<zr.spectrum.length;si2++){
+var sp2=zr.spectrum[si2];
+if(sp2.cph>maxFreq)continue;
+var px=xs(sp2.cph),py=ys(sp2.mag);
+path+=(path?'L':'M')+px.toFixed(1)+','+py.toFixed(1);
+}
+svg+='<path d="'+path+'" fill="none" stroke="'+zr.color+'" stroke-width="1.5" opacity="0.7"/>';
+
+// Mark peaks with dots
+for(var pk=0;pk<zr.peaks.length;pk++){
+if(zr.peaks[pk].cph<=maxFreq&&zr.peaks[pk].mag>globalMaxMag*0.15){
+var pkx=xs(zr.peaks[pk].cph),pky=ys(zr.peaks[pk].mag);
+svg+='<circle cx="'+pkx.toFixed(1)+'" cy="'+pky.toFixed(1)+'" r="4" fill="'+zr.color+'" opacity="0.9"/>';
+}
+}
+}
+
+// Legend
+var ly=p.t+6;
+for(var li=0;li<zoneResults.length;li++){
+var sn=zoneResults[li].name.replace(/___.*/, '').replace(/_/g,' ');
+svg+='<rect x="'+(W-p.r+4)+'" y="'+ly+'" width="8" height="8" fill="'+zoneResults[li].color+'" rx="1"/>';
+svg+='<text x="'+(W-p.r+16)+'" y="'+(ly+8)+'" fill="'+fg+'" font-size="8">'+sn+'</text>';
+ly+=14;
+}
+
+svg+='<text x="'+(p.l+pw/2)+'" y="16" text-anchor="middle" fill="'+fg+'" font-size="12" font-weight="600">FFT Spectral Analysis \u2014 Fault Frequencies</text>';
+svg+='</svg>';
+
+// Peak analysis table
+var th='<table style="width:100%;border-collapse:collapse;font-size:0.82em;margin-top:6px">';
+th+='<tr style="opacity:0.5;font-size:0.85em"><td>Zone</td><td style="text-align:right">Peak Period</td><td style="text-align:right">Amplitude</td><td style="text-align:right">Diagnosis</td></tr>';
+
+for(var ti=0;ti<zoneResults.length;ti++){
+var zt=zoneResults[ti];
+if(zt.peaks.length===0)continue;
+var pk1=zt.peaks[0];
+var period=pk1.periodHr;
+var diag,dColor;
+
+if(period>20&&period<28){diag='Diurnal (normal)';dColor='var(--ok,#38a169)';}
+else if(period>10&&period<14){diag='12h cycle (schedule?)';dColor='var(--wn,#dd6b20)';}
+else if(period>=2&&period<=6){diag='Multi-hour cycling';dColor='var(--wn,#dd6b20)';}
+else if(period>=0.5&&period<2){diag='Short cycling';dColor='var(--dg,#e53e3e)';}
+else if(period<0.5){diag='Hunting/oscillation';dColor='var(--dg,#e53e3e)';}
+else{diag='Long period';dColor=fg;}
+
+var periodStr=period>=1?(Math.round(period*10)/10+'h'):(Math.round(period*60)+'m');
+var shortN=zt.name.replace(/___.*/, '').replace(/_/g,' ');
+th+='<tr><td>'+shortN+'</td>';
+th+='<td style="text-align:right">'+periodStr+'</td>';
+th+='<td style="text-align:right">'+pk1.mag.toFixed(2)+'\u00b0F</td>';
+th+='<td style="text-align:right;color:'+dColor+'">'+diag+'</td></tr>';
+}
+th+='</table>';
+
+// Render
+var el=document.getElementById('fftPanel');
+if(!el){
+var ref=document.getElementById('psychroPanel')||document.getElementById('energySigPanel')||document.getElementById('durationCurvePanel')||document.getElementById('analysisGrid');
+if(!ref)return;
+el=document.createElement('div');el.id='fftPanel';
+ref.parentNode.insertBefore(el,ref.nextSibling);
+}
+
+el.innerHTML='<div class="card" style="margin-bottom:12px"><h2 class="card-title">FFT SPECTRAL ANALYSIS</h2>'+svg+th+
+'<details style="margin-top:6px;font-size:0.72em;opacity:0.6"><summary style="cursor:pointer">\u2139\ufe0f About</summary>'+
+'<p style="margin:3px 0">Decomposes the temperature signal into frequency components using Fourier analysis. '+
+'A healthy HVAC shows a dominant 24-hour (diurnal) cycle with small harmonics.</p>'+
+'<p style="margin:3px 0"><b>Short cycling</b> (peaks at 30-60 min): thermostat overshooting, faulty control. '+
+'<b>Hunting</b> (peaks at &lt;30 min): damper oscillation, sensor feedback loop. '+
+'<b>12h cycle</b>: possible schedule or day/night setback.</p>'+
+'<p style="margin:3px 0">Mode A only \u2014 requires engineering interpretation.</p>'+
+'</details></div>';
+
+}catch(e){console.warn('[FFT]',e);}
+}
+
+setTimeout(build,8000);setInterval(build,300000);
+var ag=document.getElementById('analysisGrid');
+if(ag)new MutationObserver(function(){setTimeout(build,800);}).observe(ag,{childList:true});
+})();

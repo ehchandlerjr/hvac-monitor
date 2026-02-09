@@ -1817,3 +1817,26 @@ d.textContent=out;
 }catch(e){d.textContent='ERR:'+e.message;}
 },8000);
 })();
+
+// === DEBUG v2 — zone keys ===
+(function(){
+setTimeout(function(){
+var d=document.getElementById('dbgOut');
+if(!d)return;
+try{
+var data=typeof window._hvacData==='function'?window._hvacData():null;
+if(!data||!data.zones)return;
+var out='=== 15s check ===\n';
+for(var i=0;i<data.zones.length;i++){
+var z=data.zones[i];
+out+=z.name+' KEYS:'+Object.keys(z).join(',')+'\n';
+for(var k in z){
+if(Array.isArray(z[k]))out+='  '+k+'.length='+z[k].length+'\n';
+else if(typeof z[k]==='object'&&z[k])out+='  '+k+'='+JSON.stringify(z[k]).substring(0,80)+'\n';
+else out+='  '+k+'='+z[k]+'\n';
+}
+}
+d.textContent+='\n'+out;
+}catch(e){d.textContent+='\nERR2:'+e.message;}
+},15000);
+})();

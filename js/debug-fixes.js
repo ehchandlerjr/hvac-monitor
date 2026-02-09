@@ -1840,3 +1840,17 @@ d.textContent+='\n'+out;
 }catch(e){d.textContent+='\nERR2:'+e.message;}
 },15000);
 })();
+
+// === DEBUG v3 — timeSeries sample ===
+(function(){
+setTimeout(function(){
+var d=document.getElementById('dbgOut');
+if(!d)return;
+var data=typeof window._hvacData==='function'?window._hvacData():null;
+if(!data||!data.zones)return;
+var z=data.zones[0];
+var ts=z.timeSeries||z.readings||[];
+d.textContent+='\n=== timeSeries ===\nlen:'+ts.length+'\n';
+if(ts.length>0)d.textContent+='keys:'+Object.keys(ts[0]).join(',')+'\nsample:'+JSON.stringify(ts[0]).substring(0,200)+'\nsample2:'+JSON.stringify(ts[ts.length-1]).substring(0,200);
+},10000);
+})();

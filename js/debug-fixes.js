@@ -1425,3 +1425,233 @@ window._exportSidsLog = function() {
   var ag = document.getElementById('analysisGrid');
   if (ag) new MutationObserver(function() { setTimeout(computeStack, 350); }).observe(ag, { childList: true });
 })();
+
+
+// === DURATION CURVE — Projection Transform (Category 2) ===
+// Sorts all temperature readings descending, plots rank vs temperature.
+// THE single most devastating landlord statistic:
+//   "Your building fails to maintain acceptable temperature X% of the monitored period."
+//
+// X-axis: % of time (0 = hottest moment, 100 = coldest moment)
+// Y-axis: temperature (°F)
+// Threshold lines: SIDS tiers (72/75/78), setpoint (71)
+// Per-zone curves overlaid with zone colors
+//
+// Mode A: full plot with all zones
+// Mode B: extracts one number — "fails X% above 75°F"
+
+(function() {
+  if (window._durationCurveInit) return;
+  window._durationCurveInit = true;
+  window._durationCurveStats = null;
+
+  function cssVar(name) {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  }
+
+  var THRESHOLDS = [
+    { temp: 78, label: 'SIDS DANGER', color: '#e53e3e', dash: '6,3' },
+    { temp: 75, label: 'SIDS WARNING', color: '#dd6b20', dash: '6,3' },
+    { temp: 72, label: 'SIDS INFO', color: '#d69e2e', dash: '4,4' },
+    { temp: 71, label: 'Setpoint', color: '#4299e1', dash: '2,4' }
+  ];
+
+  // Zone colors matching existing chart
+  var ZONE_COLORS = ['#e53e3e', '#dd6b20', '#38a169', '#4299e1'];
+
+  function buildDurationCurve() {
+    try {
+      var data = typeof window._hvacData === 'function' ? window._hvacData() : null;
+      if (!data || !data.zones || data.zones.length === 0) return;
+
+      // Collect all readings per zone
+      var zoneCurves = [];
+      var stats = [];
+      var globalMin = 999, globalMax = -999;
+
+      for (var zi = 0; zi < data.zones.length; zi++) {
+        var zone = data.zones[zi];
+        if (!zone.readings || zone.readings.length < 3) continue;
+
+        // Extract and sort temperatures descending
+        var temps = [];
+        for (var ri = 0; ri < zone.readings.length; ri++) {
+          var t = zone.readings[ri].temp;
+          if (t != null && !isNaN(t)) temps.push(t);
+        }
+        if (temps.length < 3) continue;
+
+        temps.sort(function(a, b) { return b - a; }); // descending
+
+        // Calculate exceedance percentages
+        var exceed75 = 0, exceed72 = 0, exceed78 = 0;
+        for (var i = 0; i < temps.length; i++) {
+          if (temps[i] > 78) exceed78++;
+          if (temps[i] > 75) exceed75++;
+          if (temps[i] > 72) exceed72++;
+        }
+
+        var n = temps.length;
+        var zoneStats = {
+          zone: zone.name,
+          readings: n,
+          exceed78pct: Math.round(exceed78 / n * 1000) / 10,
+          exceed75pct: Math.round(exceed75 / n * 1000) / 10,
+          exceed72pct: Math.round(exceed72 / n * 1000) / 10,
+          maxTemp: temps[0],
+          minTemp: temps[n - 1],
+          medianTemp: temps[Math.floor(n / 2)]
+        };
+        stats.push(zoneStats);
+
+        if (temps[0] > globalMax) globalMax = temps[0];
+        if (temps[n - 1] < globalMin) globalMin = temps[n - 1];
+
+        zoneCurves.push({
+          name: zone.name,
+          temps: temps,
+          color: ZONE_COLORS[zi % ZONE_COLORS.length]
+        });
+      }
+
+      if (zoneCurves.length === 0) return;
+
+      window._durationCurveStats = stats;
+
+      // SVG dimensions
+      var W = 580, H = 320;
+      var pad = { top: 30, right: 100, bottom: 45, left: 55 };
+      var pw = W - pad.left - pad.right;
+      var ph = H - pad.top - pad.bottom;
+
+      // Y-axis range: round to nearest 2°F
+      var yMin = Math.floor(globalMin / 2) * 2 - 2;
+      var yMax = Math.ceil(globalMax / 2) * 2 + 2;
+      if (yMin > 60) yMin = 60; // always show context
+      if (yMax < 80) yMax = 80; // always show SIDS range
+
+      function xScale(pct) { return pad.left + (pct / 100) * pw; }
+      function yScale(temp) { return pad.top + (1 - (temp - yMin) / (yMax - yMin)) * ph; }
+
+      var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;max-width:600px;font-family:inherit">';
+
+      // Background
+      svg += '<rect x="0" y="0" width="' + W + '" height="' + H + '" fill="' + (cssVar('--card-bg') || '#1a1a2e') + '" rx="8"/>';
+
+      // Grid lines (y-axis)
+      var fg = cssVar('--fg') || '#ccc';
+      var gridColor = cssVar('--grid') || 'rgba(255,255,255,0.08)';
+      for (var temp = Math.ceil(yMin); temp <= yMax; temp += 2) {
+        var gy = yScale(temp);
+        svg += '<line x1="' + pad.left + '" y1="' + gy + '" x2="' + (W - pad.right) + '" y2="' + gy + '" stroke="' + gridColor + '" stroke-width="0.5"/>';
+        svg += '<text x="' + (pad.left - 8) + '" y="' + (gy + 4) + '" text-anchor="end" fill="' + fg + '" font-size="10" opacity="0.6">' + temp + '°</text>';
+      }
+
+      // Grid lines (x-axis: 0%, 25%, 50%, 75%, 100%)
+      for (var pct = 0; pct <= 100; pct += 25) {
+        var gx = xScale(pct);
+        svg += '<line x1="' + gx + '" y1="' + pad.top + '" x2="' + gx + '" y2="' + (H - pad.bottom) + '" stroke="' + gridColor + '" stroke-width="0.5"/>';
+        svg += '<text x="' + gx + '" y="' + (H - pad.bottom + 16) + '" text-anchor="middle" fill="' + fg + '" font-size="10" opacity="0.6">' + pct + '%</text>';
+      }
+
+      // Axis labels
+      svg += '<text x="' + (pad.left + pw / 2) + '" y="' + (H - 5) + '" text-anchor="middle" fill="' + fg + '" font-size="11" opacity="0.7">% of Monitored Period (Exceedance)</text>';
+      svg += '<text x="14" y="' + (pad.top + ph / 2) + '" text-anchor="middle" fill="' + fg + '" font-size="11" opacity="0.7" transform="rotate(-90,14,' + (pad.top + ph / 2) + ')">Temperature (°F)</text>';
+
+      // Threshold lines
+      for (var ti = 0; ti < THRESHOLDS.length; ti++) {
+        var thr = THRESHOLDS[ti];
+        if (thr.temp >= yMin && thr.temp <= yMax) {
+          var ty = yScale(thr.temp);
+          svg += '<line x1="' + pad.left + '" y1="' + ty + '" x2="' + (W - pad.right) + '" y2="' + ty + '" stroke="' + thr.color + '" stroke-width="1.5" stroke-dasharray="' + thr.dash + '" opacity="0.8"/>';
+          svg += '<text x="' + (W - pad.right + 4) + '" y="' + (ty + 4) + '" fill="' + thr.color + '" font-size="9" opacity="0.9">' + thr.label + '</text>';
+        }
+      }
+
+      // Zone curves
+      for (var ci = 0; ci < zoneCurves.length; ci++) {
+        var curve = zoneCurves[ci];
+        var n = curve.temps.length;
+        var path = '';
+        // Sample at most 200 points for performance
+        var step = Math.max(1, Math.floor(n / 200));
+        for (var i = 0; i < n; i += step) {
+          var xPct = (i / (n - 1)) * 100;
+          var px = xScale(xPct);
+          var py = yScale(curve.temps[i]);
+          path += (i === 0 ? 'M' : 'L') + px.toFixed(1) + ',' + py.toFixed(1);
+        }
+        // Always include last point
+        if ((n - 1) % step !== 0) {
+          path += 'L' + xScale(100).toFixed(1) + ',' + yScale(curve.temps[n - 1]).toFixed(1);
+        }
+        svg += '<path d="' + path + '" fill="none" stroke="' + curve.color + '" stroke-width="2" opacity="0.85"/>';
+      }
+
+      // Legend
+      var ly = pad.top + 8;
+      for (var li = 0; li < zoneCurves.length; li++) {
+        svg += '<rect x="' + (W - pad.right + 4) + '" y="' + ly + '" width="10" height="10" fill="' + zoneCurves[li].color + '" rx="2" opacity="0.85"/>';
+        svg += '<text x="' + (W - pad.right + 18) + '" y="' + (ly + 9) + '" fill="' + fg + '" font-size="9">' + zoneCurves[li].name.replace(/___.*/, '').replace(/_/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); }) + '</text>';
+        ly += 16;
+      }
+
+      // Title
+      svg += '<text x="' + (pad.left + pw / 2) + '" y="18" text-anchor="middle" fill="' + fg + '" font-size="13" font-weight="600">Duration Curve — Temperature Exceedance</text>';
+
+      svg += '</svg>';
+
+      // Build summary stats HTML
+      var summaryHtml = '<div style="margin-top:8px;font-size:0.85em">';
+      for (var si = 0; si < stats.length; si++) {
+        var s = stats[si];
+        var shortName = s.zone.replace(/___.*/, '').replace(/_/g, ' ');
+        var worstPct = s.exceed75pct;
+        var worstColor = worstPct > 10 ? 'var(--dg, #e53e3e)' : worstPct > 0 ? 'var(--wn, #dd6b20)' : 'var(--ok, #38a169)';
+        summaryHtml += '<div style="display:flex;justify-content:space-between;padding:2px 0">';
+        summaryHtml += '<span>' + shortName + '</span>';
+        summaryHtml += '<span style="color:' + worstColor + ';font-weight:600">';
+        if (worstPct > 0) {
+          summaryHtml += 'Exceeds 75\u00b0F for ' + worstPct + '% of period';
+        } else {
+          summaryHtml += 'Never exceeds 75\u00b0F';
+        }
+        summaryHtml += ' (' + s.readings + ' readings)</span>';
+        summaryHtml += '</div>';
+      }
+      summaryHtml += '</div>';
+
+      // Render into DOM
+      var panel = document.getElementById('durationCurvePanel');
+      if (!panel) {
+        var ref = document.getElementById('stackPanel') || document.getElementById('ffPanel') || document.getElementById('analysisGrid');
+        if (!ref) return;
+        panel = document.createElement('div');
+        panel.id = 'durationCurvePanel';
+        ref.parentNode.insertBefore(panel, ref.nextSibling);
+      }
+
+      panel.innerHTML = '<div class="card" style="margin-bottom:12px">' +
+        '<h2 class="card-title">DURATION CURVE</h2>' +
+        svg + summaryHtml +
+        '<details style="margin-top:8px;font-size:0.75em;opacity:0.6"><summary style="cursor:pointer">\u2139\ufe0f What is a duration curve?</summary>' +
+        '<p style="margin:4px 0">A duration curve sorts all temperature readings from highest to lowest. ' +
+        'The X-axis shows what percentage of the monitored period was at or above each temperature.</p>' +
+        '<p style="margin:4px 0">Read it as: "at the 20% mark, the room was above X\u00b0F for 20% of the time."</p>' +
+        '<p style="margin:4px 0">The steeper the curve, the more variable the temperature. ' +
+        'A flat curve near the setpoint = good control. A curve that stays above threshold lines = sustained failure.</p>' +
+        '<p style="margin:4px 0"><b>For your landlord:</b> "My child\u2019s room exceeds safe temperature limits ' +
+        'for X% of the monitored period" is a single statistic a judge can act on.</p>' +
+        '</details></div>';
+
+    } catch (e) { console.warn('[DURATION] render error:', e); }
+  }
+
+  // Run after data loads and periodically
+  setTimeout(buildDurationCurve, 5000);
+  setInterval(buildDurationCurve, 300000);
+
+  // Also run when analysis grid updates (data refresh)
+  var ag = document.getElementById('analysisGrid');
+  if (ag) new MutationObserver(function() { setTimeout(buildDurationCurve, 500); }).observe(ag, { childList: true });
+})();

@@ -108,6 +108,9 @@ def get_device_history(device_id, location_id):
             if not items:
                 break
             all_items.extend(items)
+            if page == 1 and items:
+                seen_attrs = set(i.get("attribute","") for i in items)
+                print(f"    Attributes in history: {sorted(seen_attrs)}")
             nl = data.get("_links", {}).get("next", {}).get("href")
             if nl:
                 parsed = parse_qs(urlparse(nl).query)
@@ -137,7 +140,7 @@ def history_to_readings(items, since):
                 temp = float(value)
                 if "C" in unit and "F" not in unit: temp = temp * 9 / 5 + 32
                 buckets[bk]["temp_f"] = round(temp, 2)
-            elif attr == "humidity":
+            elif attr in ("humidity", "relativeHumidity"):
                 buckets[bk]["humidity_pct"] = round(float(value), 2)
             elif attr == "battery":
                 buckets[bk]["battery_pct"] = int(float(value))
@@ -163,7 +166,7 @@ def main():
         try:
             items = get_device_history(device_id, location_id)
             readings = history_to_readings(items, since)
-            sensor_id = device_label.lower().replace(" ","_").replace("-","_")
+            sensor_id = device_label.lower().replace("2018","'").replace("2019","'").replace("201c","'").replace("201d","'").replace(" ","_").replace("-","_")
             for reading in readings:
                 all_rows.append({"timestamp":reading["timestamp"],"sensor_id":sensor_id,"device_id":device_id,
                     "temp_f":reading.get("temp_f"),"humidity_pct":reading.get("humidity_pct"),
